@@ -183,6 +183,11 @@ REST_FRAMEWORK = {
 }
 
 # CORS settings
+# CORS_URLS_REGEX = r"^/api/.*$"
 CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "https://discount-ecommerce-frontend.vercel.app/",
+    "https://grottomore.com/",
+]
 
 SWAGGER_USE_COMPAT_RENDERERS = False
