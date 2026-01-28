@@ -1,5 +1,6 @@
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -10,6 +11,7 @@ from .serializers import (
     VendorAdminSignupResponseSerializer,
     VendorAdminSignupSerializer,
     VendorSerializer,
+    VendorUpdateSerializer,
 )
 
 
@@ -50,10 +52,10 @@ class VendorAdminSignupView(generics.CreateAPIView):
         }
         return Response(response, status=status.HTTP_201_CREATED)
 
-
-class VendorMeView(generics.RetrieveAPIView):
+class VendorMeView(generics.RetrieveUpdateAPIView):
     serializer_class = VendorSerializer
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_object(self):
         user = self.request.user
@@ -61,12 +63,37 @@ class VendorMeView(generics.RetrieveAPIView):
             return None
         return Vendor.objects.get(id=user.vendor_id)
 
+    def get_serializer_class(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            return VendorUpdateSerializer
+        return VendorSerializer
+
     def retrieve(self, request, *args, **kwargs):
         vendor = self.get_object()
         if vendor is None:
             return Response({"detail": "No vendor linked to this user."}, status=404)
-        return Response(self.get_serializer(vendor).data)
+        return Response(VendorSerializer(vendor, context={"request": request}).data)
 
+    def update(self, request, *args, **kwargs):
+        partial = self.request.method == "PATCH"
+        vendor = self.get_object()
+        if vendor is None:
+            return Response({"detail": "No vendor linked to this user."}, status=404)
+        serializer = VendorUpdateSerializer(vendor, data=request.data, context={"request": request}, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(VendorSerializer(vendor, context={"request": request}).data)
+
+class VendorDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = VendorSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    parser_classes = [MultiPartParser, FormParser]
+    queryset = Vendor.objects.all()
+
+    def get_serializer_class(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            return VendorUpdateSerializer
+        return VendorSerializer
 
 class VendorListView(generics.ListAPIView):
     """

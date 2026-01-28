@@ -14,11 +14,29 @@ class VendorSerializer(serializers.ModelSerializer):
             "slug",
             "status",
             "rejection_reason",
+            "business_email",
+            "phone",
+            "address",
+            "logo",
+            "website",
+            "about",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "slug", "status", "rejection_reason", "created_at", "updated_at"]
 
+class VendorUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VendorModel
+        fields = [
+            "name",
+            "business_email",
+            "phone",
+            "address",
+            "logo",
+            "website",
+            "about",
+        ]
 
 class VendorAdminSignupSerializer(serializers.Serializer):
     # User fields
@@ -69,4 +87,3 @@ class VendorAdminSignupResponseSerializer(serializers.Serializer):
     vendor = VendorSerializer()
     refresh = serializers.CharField()
     access = serializers.CharField()
-
