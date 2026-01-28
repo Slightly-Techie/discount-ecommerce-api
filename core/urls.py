@@ -61,6 +61,7 @@ class TestProtectedView(APIView):
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/users/", include("api.users.urls")),
+    path("api/vendors/", include("api.vendors.urls")),
     path("api/products/", include("api.products.urls")),
     path("api/category/", include("api.category.urls")),
     path("api/cart/", include("api.cart.urls")),

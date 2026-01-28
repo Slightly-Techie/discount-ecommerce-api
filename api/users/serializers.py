@@ -38,6 +38,13 @@ class UserSerializer(serializers.ModelSerializer):
 
     profile = ProfileSerializer(read_only=True)
     addresses = AddressSerializer(many=True, read_only=True)
+    vendor = serializers.SerializerMethodField()
+
+    def get_vendor(self, obj):
+        if not getattr(obj, "vendor_id", None):
+            return None
+        v = obj.vendor
+        return {"id": str(v.id), "name": v.name, "status": v.status}
 
     class Meta:
         model = User
@@ -56,6 +63,7 @@ class UserSerializer(serializers.ModelSerializer):
             "date_of_birth",
             "gender",
             "role",
+            "vendor",
             "is_deleted",
             "metadata",
             "profile",
@@ -74,6 +82,7 @@ class UserSerializer(serializers.ModelSerializer):
             "updated_at",
             "profile",
             "addresses",
+            "vendor",
         ]
 
 

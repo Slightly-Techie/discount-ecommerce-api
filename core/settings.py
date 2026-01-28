@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "storages",
     # Local Apps
     "api.users",
+    "api.vendors",
     "api.products",
     "api.category",
     "api.cart",

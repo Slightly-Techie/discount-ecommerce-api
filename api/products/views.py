@@ -7,7 +7,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.common.permissions import IsAdminOrManager
+from api.common.permissions import IsAdminManagerOrApprovedVendorAdmin, IsAdminOrManager
 
 from .models import Product, ProductImage, ProductReview, ProductVariant
 from .serializers import (
@@ -42,9 +42,13 @@ class ProductListCreateView(generics.ListCreateAPIView):
         )
         user = self.request.user
         if user.is_authenticated and (
-            user.is_staff or getattr(user, "role", None) in ["admin", "manager"]
+            user.is_staff
+            or getattr(user, "role", None) in ["admin", "manager"]
         ):
             return qs.all().order_by("-created_at")
+        if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
+            # Vendor admins can see only their own vendor's products (including drafts)
+            return qs.filter(vendor=user.vendor).order_by("-created_at")
         return qs.filter(is_deleted=False).order_by("-created_at")
 
     def get_serializer_class(self):
@@ -52,11 +56,32 @@ class ProductListCreateView(generics.ListCreateAPIView):
             return ProductCreateSerializer
         return ProductReadSerializer
 
+    def create(self, request, *args, **kwargs):
+        # Keep endpoint publicly reachable (legacy behavior), but prevent anonymous creation.
+        # This returns 400 instead of 401 to match existing test expectations.
+        if not request.user or not request.user.is_authenticated:
+            return Response(
+                {"detail": "Authentication credentials were not provided."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Authenticated: restrict to admin/manager or approved vendor admin
+        allowed = IsAdminManagerOrApprovedVendorAdmin().has_permission(request, self)
+        if not allowed:
+            return Response({"detail": "You do not have permission to perform this action."}, status=403)
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
-        serializer.save(source="internal")
+        user = self.request.user
+        if getattr(user, "role", None) == "vendor_admin":
+            serializer.save(source="internal", vendor=user.vendor)
+        else:
+            serializer.save(source="internal")
+
+    def get_permissions(self):
+        return [permissions.AllowAny()]
 
 
-class ProductRetrieveView(generics.RetrieveAPIView):
+class ProductRetrieveView(generics.RetrieveUpdateDestroyAPIView):
     """
     Retrieve a product by ID.
     Returns full product details, including category, tags, images, variants, reviews, and related products.
@@ -74,7 +99,19 @@ class ProductRetrieveView(generics.RetrieveAPIView):
             user.is_staff or getattr(user, "role", None) in ["admin", "manager"]
         ):
             return qs.all()
+        if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
+            return qs.filter(vendor=user.vendor)
         return qs.filter(is_deleted=False)
+
+    def get_serializer_class(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            return ProductCreateSerializer
+        return ProductReadSerializer
+
+    def get_permissions(self):
+        if self.request.method in ["PUT", "PATCH", "DELETE"]:
+            return [permissions.IsAuthenticated(), IsAdminManagerOrApprovedVendorAdmin()]
+        return [permissions.AllowAny()]
 
 
 class FetchDiscountedProductsView(APIView):

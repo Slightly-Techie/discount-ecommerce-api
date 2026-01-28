@@ -72,6 +72,7 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     class Role(models.TextChoices):
         CUSTOMER = "customer", "Customer"
         SELLER = "seller", "Seller"
+        VENDOR_ADMIN = "vendor_admin", "Vendor Admin"
         MANAGER = "manager", "Manager"
         ADMIN = "admin", "Admin"
 
@@ -92,6 +93,13 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
         max_length=10, blank=True, null=True, choices=Gender.choices
     )
     role = models.CharField(max_length=20, default=Role.CUSTOMER, choices=Role.choices)
+    vendor = models.ForeignKey(
+        "vendors.Vendor",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="admins",
+    )
     is_deleted = models.BooleanField(default=False)
     metadata = models.JSONField(blank=True, null=True)
     otp_secret = models.CharField(max_length=32, blank=True, null=True)

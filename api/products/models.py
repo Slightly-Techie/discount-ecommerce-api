@@ -47,6 +47,13 @@ class Product(BaseModel):
     stock = models.PositiveIntegerField(default=0)
     is_deleted = models.BooleanField(default=False)
     related_products = models.ManyToManyField("self", blank=True)
+    vendor = models.ForeignKey(
+        "vendors.Vendor",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="products",
+    )
 
     def save(self, *args, **kwargs):
         if not self.slug:

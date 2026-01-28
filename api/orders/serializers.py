@@ -109,12 +109,20 @@ class OrderSerializer(serializers.ModelSerializer):
     address = AddressSerializer(read_only=True)
     reviews = OrderReviewSerializer(many=True, read_only=True)
     coupon = CouponSerializer(read_only=True)
+    vendor = serializers.SerializerMethodField()
+
+    def get_vendor(self, obj):
+        if not getattr(obj, "vendor_id", None):
+            return None
+        v = obj.vendor
+        return {"id": str(v.id), "name": v.name, "status": v.status}
 
     class Meta:
         model = Order
         fields = [
             "id",
             "user",
+            "vendor",
             "address",
             "status",
             "total",
@@ -153,3 +161,11 @@ class CheckoutResponseSerializer(OrderSerializer):
 
     class Meta(OrderSerializer.Meta):
         fields = OrderSerializer.Meta.fields + ["shipping_warning"]
+
+
+class CheckoutResponseMultiOrderSerializer(serializers.Serializer):
+    """
+    Multi-vendor checkout response: returns multiple orders (one per vendor group).
+    """
+
+    orders = CheckoutResponseSerializer(many=True)
