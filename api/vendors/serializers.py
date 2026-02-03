@@ -49,6 +49,12 @@ class VendorAdminSignupSerializer(serializers.Serializer):
     # Vendor fields
     vendor_name = serializers.CharField(max_length=255)
 
+    def validate_email(self, value: str):
+        from api.users.models import User
+        if User.objects.filter(email__iexact=value.strip()).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value.strip()
+
     def validate_vendor_name(self, value: str):
         if VendorModel.objects.filter(name__iexact=value.strip()).exists():
             raise serializers.ValidationError("Vendor name already exists.")

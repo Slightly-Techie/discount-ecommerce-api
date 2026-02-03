@@ -28,6 +28,9 @@ from api.products.tests.factories import (
 # Users
 from api.users.tests.factories import AddressFactory, ProfileFactory, UserFactory
 
+# Vendors
+from api.vendors.tests.factories import VendorFactory
+
 register(CouponFactory)
 register(CouponUsageFactory)
 register(OrderFactory)
@@ -44,6 +47,7 @@ register(CategoryFactory)
 register(TagFactory)
 register(CartFactory)
 register(CartItemFactory)
+register(VendorFactory)
 # BaseModelFactory is abstract, not registered as a fixture
 
 
