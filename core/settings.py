@@ -192,3 +192,19 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 SWAGGER_USE_COMPAT_RENDERERS = False
+
+# Security settings for production SSL and proxy handling
+CSRF_TRUSTED_ORIGINS = [
+    "https://grottomore.com",
+    "https://api.grottomore.com", 
+    "https://discount-ecommerce-frontend.vercel.app",
+]
+
+# Enable secure cookies in production
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+SECURE_SSL_REDIRECT = not DEBUG
+
+# Handle HTTPS proxy headers
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
