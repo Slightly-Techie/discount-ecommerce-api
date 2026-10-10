@@ -57,8 +57,7 @@ docker run --rm -it \
   --email "$EMAIL" \
   --agree-tos \
   --no-eff-email \
-  -d "$DOMAIN" \
-  -d "www.$DOMAIN"
+  -d "$DOMAIN" 
 
 # Check if certificates were generated
 if [ ! -f "ssl/fullchain.pem" ] || [ ! -f "ssl/privkey.pem" ]; then

@@ -62,6 +62,11 @@ python manage.py runserver
 - Filtering, search, ordering on all major endpoints
 - Admin dashboards for all models
 
+## Deployment
+- GitHub Actions to EC2 (production): see [docs/GITHUB_ACTIONS_EC2_DEPLOYMENT.md](docs/GITHUB_ACTIONS_EC2_DEPLOYMENT.md)
+- Quick manual EC2 deploy steps: see [docs/QUICK_DEPLOY.md](docs/QUICK_DEPLOY.md)
+- SSL setup details: see [docs/SSL_SETUP.md](docs/SSL_SETUP.md)
+
 ## Contributing
 Pull requests are welcome! Please open an issue first to discuss major changes.
 

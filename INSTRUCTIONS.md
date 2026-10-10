@@ -296,7 +296,7 @@ Key steps:
    ```
 7. Build and run containers with `docker-compose up -d` on the server.
 
-There may be additional quick‑deploy guides such as `QUICK_DEPLOY.md` or SSL‑specific docs in the repo—refer to them if present.
+There may be additional quick‑deploy guides such as `docs/QUICK_DEPLOY.md` or SSL‑specific docs in the repo—refer to them if present.
 
 ---
 
@@ -393,4 +393,3 @@ When adding or modifying functionality:
 7. Run formatting/linting (`black`, `isort`, `flake8`, `pre-commit`).
 
 Following these steps will keep the codebase consistent and maintainable.
-

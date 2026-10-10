@@ -67,4 +67,4 @@ crontab -e
 0 12 * * * docker run --rm -v $(pwd)/ssl:/etc/letsencrypt -v $(pwd)/ssl:/var/lib/letsencrypt certbot/certbot renew --quiet && cp ssl/fullchain.pem ssl/cert.pem && cp ssl/privkey.pem ssl/key.pem && docker-compose restart nginx
 ```
 
-That's it! Your SSL certificates will be generated and nginx will serve your application over HTTPS. 
+That's it! Your SSL certificates will be generated and nginx will serve your application over HTTPS.

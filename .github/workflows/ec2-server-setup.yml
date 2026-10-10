@@ -1,0 +1,42 @@
+name: EC2 Server Setup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-ec2:
+    name: Prepare EC2 server for Docker deployment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare EC2 server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.EC2_SSH_PORT != '' && secrets.EC2_SSH_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -eux
+
+            sudo dnf update -y
+
+            sudo dnf install git -y
+
+            sudo dnf install docker -y
+            sudo systemctl start docker
+            sudo systemctl enable --now docker
+
+            sudo mkdir -p /usr/libexec/docker/cli-plugins
+            sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m) -o /usr/libexec/docker/cli-plugins/docker-compose
+            sudo chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
+            docker compose version
+
+            sudo mkdir -p /usr/libexec/docker/cli-plugins
+            VERSION=v0.19.1
+            sudo curl -SL "https://github.com/docker/buildx/releases/download/v0.19.1/buildx-v0.19.1.linux-amd64" -o /usr/libexec/docker/cli-plugins/docker-buildx
+            sudo chmod +x /usr/libexec/docker/cli-plugins/docker-buildx
+
+            docker buildx version
