@@ -1,35 +1,49 @@
 # SSL Certificate Setup with Certbot Docker
 
+## Overview
+
+This project uses Certbot inside Docker to generate Let’s Encrypt certificates for the EC2 deployment. Certbot stores certificates in the standard `ssl/live/<domain>/` directory, and the nginx container expects the nginx-compatible copies in `ssl/cert.pem` and `ssl/key.pem`.
+
 ## Quick SSL Certificate Generation
 
-Since Docker and Docker Compose are already installed on your EC2 instance, use the provided script to generate SSL certificates:
+From the project root on the EC2 instance:
 
 ```bash
-# Make the script executable
 chmod +x generate-ssl.sh
-
-# Run the script with your domain
-./generate-ssl.sh your-domain.com your-email@example.com
+./generate-ssl.sh api.grottomore.com admin@api.grottomore.com
 ```
 
-## What the Script Does
+This script does the following:
 
-- Uses the official certbot docker image
-- Generates certificates for your domain and www subdomain
-- Places certificates in the `ssl/` directory where nginx expects them
-- Automatically updates nginx configuration with your domain
-- Sets proper file permissions
-- Restarts nginx with the new certificates
+- creates the `ssl/` directory
+- generates the certificate using Certbot
+- verifies the certs at `ssl/live/api.grottomore.com/fullchain.pem` and `ssl/live/api.grottomore.com/privkey.pem`
+- copies them to `ssl/fullchain.pem` and `ssl/privkey.pem`
+- copies them again to the nginx-compatible names `ssl/cert.pem` and `ssl/key.pem`
+- sets the correct file permissions
+- restarts nginx
 
-## Manual Commands (if needed)
+## What to do if certificates already exist
 
-If you prefer to run the commands manually:
+If the cert already exists in `ssl/live/<domain>/`, you can skip the generation step and only copy the certs into the files nginx is configured to read:
 
 ```bash
-# Create SSL directory
+mkdir -p ssl
+cp ssl/live/api.grottomore.com/fullchain.pem ssl/cert.pem
+cp ssl/live/api.grottomore.com/privkey.pem ssl/key.pem
+chmod 600 ssl/key.pem
+chmod 644 ssl/cert.pem
+
+docker compose restart nginx
+```
+
+## Manual certbot command
+
+If you prefer to generate the cert manually:
+
+```bash
 mkdir -p ssl
 
-# Generate SSL certificates using certbot docker image
 docker run --rm -it \
   -v $(pwd)/ssl:/etc/letsencrypt \
   -v $(pwd)/ssl:/var/lib/letsencrypt \
@@ -37,34 +51,33 @@ docker run --rm -it \
   -p 443:443 \
   certbot/certbot certonly \
   --standalone \
-  --email your-email@example.com \
+  --email admin@api.grottomore.com \
   --agree-tos \
   --no-eff-email \
-  -d your-domain.com \
-  -d www.your-domain.com
-
-# Set proper permissions
-chmod 600 ssl/privkey.pem
-chmod 644 ssl/fullchain.pem
-
-# Copy certificates to nginx location
-cp ssl/fullchain.pem ssl/cert.pem
-cp ssl/privkey.pem ssl/key.pem
-
-# Restart nginx
-docker-compose restart nginx
+  -d api.grottomore.com
 ```
 
-## SSL Renewal
-
-To set up automatic renewal, add this to your crontab:
+After that, copy the cert into nginx-friendly paths:
 
 ```bash
-# Edit crontab
-crontab -e
-
-# Add this line for daily renewal check
-0 12 * * * docker run --rm -v $(pwd)/ssl:/etc/letsencrypt -v $(pwd)/ssl:/var/lib/letsencrypt certbot/certbot renew --quiet && cp ssl/fullchain.pem ssl/cert.pem && cp ssl/privkey.pem ssl/key.pem && docker-compose restart nginx
+cp ssl/live/api.grottomore.com/fullchain.pem ssl/cert.pem
+cp ssl/live/api.grottomore.com/privkey.pem ssl/key.pem
+chmod 600 ssl/key.pem
+chmod 644 ssl/cert.pem
 ```
 
-That's it! Your SSL certificates will be generated and nginx will serve your application over HTTPS.
+## Renewal
+
+To renew automatically, add this cron job:
+
+```bash
+crontab -e
+```
+
+Then add:
+
+```bash
+0 12 * * * cd /opt/discount-ecommerce-api && docker run --rm -v $(pwd)/ssl:/etc/letsencrypt -v $(pwd)/ssl:/var/lib/letsencrypt certbot/certbot renew --quiet && cp ssl/live/api.grottomore.com/fullchain.pem ssl/cert.pem && cp ssl/live/api.grottomore.com/privkey.pem ssl/key.pem && docker compose restart nginx
+```
+
+This keeps the certs fresh and restores the nginx-compatible copies after renewal.

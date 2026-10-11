@@ -22,18 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Upload application files to EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          port: ${{ secrets.EC2_SSH_PORT != '' && secrets.EC2_SSH_PORT || '22' }}
-          source: "api,core,manage.py,requirements.txt,Dockerfile,docker-compose.yml,entrypoint.sh,nginx.conf,generate-ssl.sh,monitor.sh,sample_env"
-          target: ${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/opt/discount-ecommerce-api' }}
-          overwrite: true
-
-      - name: Deploy with Docker Compose on EC2
+      - name: Deploy application on EC2
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -44,13 +33,42 @@ jobs:
           script: |
             set -eu
 
-            APP_DIR="${{ secrets.EC2_APP_DIR }}"
-            if [ -z "$APP_DIR" ]; then
-              APP_DIR="/opt/discount-ecommerce-api"
+            APP_DIR="${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/opt/discount-ecommerce-api' }}"
+            GIT_REPO="${{ secrets.EC2_GIT_REPO != '' && secrets.EC2_GIT_REPO || 'https://github.com/Slightly-Techie/discount-ecommerce-api.git' }}"
+            GIT_BRANCH="${{ secrets.EC2_GIT_BRANCH != '' && secrets.EC2_GIT_BRANCH || 'main' }}"
+            SSL_DOMAIN="${{ secrets.EC2_SSL_DOMAIN != '' && secrets.EC2_SSL_DOMAIN || 'api.grottomore.com' }}"
+            SSL_EMAIL="${{ secrets.EC2_SSL_EMAIL != '' && secrets.EC2_SSL_EMAIL || 'admin@api.grottomore.com' }}"
+
+            sudo dnf install -y git || true
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              sudo mkdir -p "$APP_DIR"
+              sudo git clone --branch "$GIT_BRANCH" "$GIT_REPO" "$APP_DIR"
+            else
+              sudo git -C "$APP_DIR" fetch --all --tags
+              sudo git -C "$APP_DIR" checkout "$GIT_BRANCH"
+              sudo git -C "$APP_DIR" pull --ff-only origin "$GIT_BRANCH"
             fi
 
-            mkdir -p "$APP_DIR"
             cd "$APP_DIR"
+            sudo mkdir -p ssl
+
+            if [ ! -f "ssl/live/$SSL_DOMAIN/fullchain.pem" ] || [ ! -f "ssl/live/$SSL_DOMAIN/privkey.pem" ]; then
+              sudo chmod +x generate-ssl.sh
+              sudo ./generate-ssl.sh "$SSL_DOMAIN" "$SSL_EMAIL"
+            fi
+
+            if [ ! -f "ssl/live/$SSL_DOMAIN/fullchain.pem" ] || [ ! -f "ssl/live/$SSL_DOMAIN/privkey.pem" ]; then
+              echo "ERROR: SSL certificate generation failed for $SSL_DOMAIN."
+              exit 1
+            fi
+
+            if [ ! -f "ssl/cert.pem" ] || [ ! -f "ssl/key.pem" ]; then
+              sudo cp "ssl/live/$SSL_DOMAIN/fullchain.pem" ssl/cert.pem
+              sudo cp "ssl/live/$SSL_DOMAIN/privkey.pem" ssl/key.pem
+              sudo chmod 600 ssl/key.pem
+              sudo chmod 644 ssl/cert.pem
+            fi
 
             if [ -z "${{ secrets.PROD_ENV_FILE }}" ]; then
               echo "ERROR: PROD_ENV_FILE secret is required."
@@ -61,12 +79,10 @@ jobs:
             ${{ secrets.PROD_ENV_FILE }}
             ENVFILE
 
-            # CI/CD controls runtime startup tasks to avoid duplicate work after
-            # explicit deploy-time initialization below.
-            printf "\nRUN_MIGRATIONS_ON_STARTUP=false\nRUN_COLLECTSTATIC_ON_STARTUP=false\n" >> .env
-            chmod 600 .env
+            printf "\nRUN_MIGRATIONS_ON_STARTUP=true\nRUN_COLLECTSTATIC_ON_STARTUP=false\n" >> .env
+            sudo chmod 600 .env
 
-            chmod +x entrypoint.sh generate-ssl.sh monitor.sh || true
+            sudo chmod +x entrypoint.sh generate-ssl.sh monitor.sh || true
 
             compose() {
               if sudo docker compose version >/dev/null 2>&1; then
@@ -76,28 +92,28 @@ jobs:
               fi
             }
 
-            # Build first so one-off initialization uses the same image as runtime.
-            compose build web
+            BOOTSTRAP_MARKER="$APP_DIR/.bootstrap-complete"
+            if [ ! -f "$BOOTSTRAP_MARKER" ]; then
+              compose up -d db
 
-            # Start database only, then wait for readiness.
-            compose up -d db
-            DB_READY_RETRIES=30
-            until compose exec -T db pg_isready -U "${POSTGRES_USER:-elikem_user}" -d "${POSTGRES_DB:-elikem_db}" >/dev/null 2>&1; do
-              DB_READY_RETRIES=$((DB_READY_RETRIES-1))
-              if [ "$DB_READY_RETRIES" -le 0 ]; then
-                echo "ERROR: database did not become ready in time."
-                exit 1
-              fi
-              sleep 2
-            done
+              DB_READY_RETRIES=30
+              until compose exec -T db pg_isready -U "${POSTGRES_USER:-elikem_user}" -d "${POSTGRES_DB:-elikem_db}" >/dev/null 2>&1; do
+                DB_READY_RETRIES=$((DB_READY_RETRIES-1))
+                if [ "$DB_READY_RETRIES" -le 0 ]; then
+                  echo "ERROR: database did not become ready in time."
+                  exit 1
+                fi
+                sleep 2
+              done
 
-            # Explicit, idempotent database/application initialization.
-            compose run --rm web python manage.py migrate --noinput
-            compose run --rm web python manage.py collectstatic --noinput
-            compose run --rm web python manage.py add_countries
+              compose run --rm web python manage.py migrate --noinput
+              compose run --rm web python manage.py collectstatic --noinput
+              compose run --rm web python manage.py add_countries
 
-            # Start full stack.
-            compose up -d --remove-orphans
+              touch "$BOOTSTRAP_MARKER"
+            fi
+
+            compose up -d --build --remove-orphans
             compose ps
 
             sudo docker image prune -f

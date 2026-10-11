@@ -60,22 +60,22 @@ docker run --rm -it \
   -d "$DOMAIN" 
 
 # Check if certificates were generated
-if [ ! -f "ssl/fullchain.pem" ] || [ ! -f "ssl/privkey.pem" ]; then
+if [ ! -f "ssl/live/$DOMAIN/fullchain.pem" ] || [ ! -f "ssl/live/$DOMAIN/privkey.pem" ]; then
     print_error "SSL certificates were not generated successfully"
     exit 1
 fi
 
 print_status "SSL certificates generated successfully!"
 
+# Copy SSL certificate paths to standard locations
+print_status "Copying SSL certificates to standard locations..."
+cp "ssl/live/$DOMAIN/fullchain.pem" ssl/cert.pem
+cp "ssl/live/$DOMAIN/privkey.pem" ssl/key.pem
+
 # Set proper permissions
 print_status "Setting proper permissions..."
-chmod 600 ssl/privkey.pem
-chmod 644 ssl/fullchain.pem
-
-# Copy certificates to nginx location
-print_status "Copying certificates to nginx location..."
-cp ssl/fullchain.pem ssl/cert.pem
-cp ssl/privkey.pem ssl/key.pem
+chmod 600 ssl/key.pem
+chmod 644 ssl/cert.pem
 
 # Update nginx configuration with domain
 print_status "Updating nginx configuration..."
