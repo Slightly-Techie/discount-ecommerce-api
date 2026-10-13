@@ -8,7 +8,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-elikem_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-elikem_pass}
     volumes:
-      - postgres_data:/var/lib/postgresql/data/
+      - /srv/postgres/data:/var/lib/postgresql/data/
+      # - postgres_data:/var/lib/postgresql/data/
     ports:
       - "5432:5432"
 
