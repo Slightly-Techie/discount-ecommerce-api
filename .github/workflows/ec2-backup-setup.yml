@@ -1,0 +1,89 @@
+name: EC2 Backup Setup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-backup:
+    name: Configure EC2 DB backup to S3
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure backup and cron job
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.EC2_SSH_PORT != '' && secrets.EC2_SSH_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -eux
+
+            APP_DIR="${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/opt/discount-ecommerce-api' }}"
+            S3_BACKUP_BUCKET="${{ secrets.S3_BACKUP_BUCKET }}"
+
+            if [ -z "$S3_BACKUP_BUCKET" ]; then
+              echo "ERROR: S3_BACKUP_BUCKET secret is required."
+              exit 1
+            fi
+
+            sudo dnf install -y awscli || true
+
+            if ! aws --version >/dev/null 2>&1; then
+              echo "ERROR: AWS CLI is not available after installation."
+              exit 1
+            fi
+
+            sudo tee /usr/local/bin/backup-discount-ecommerce-db.sh >/dev/null <<'EOF'
+            #!/bin/bash
+            set -euo pipefail
+
+            APP_DIR="${APP_DIR}"
+            DB_NAME="${POSTGRES_DB:-elikem_db}"
+            DB_USER="${POSTGRES_USER:-elikem_user}"
+            BUCKET_NAME="${S3_BACKUP_BUCKET}"
+            TIMESTAMP=$(date +%F_%H%M%S)
+            BACKUP_DIR="/tmp"
+            FILE_NAME="docker_pg_${DB_NAME}_${TIMESTAMP}.sql.gz"
+
+            cd "$APP_DIR"
+            if [ ! -f ".env" ]; then
+              echo "Missing .env file at $APP_DIR/.env"
+              exit 1
+            fi
+
+            set -a
+            . ./.env
+            set +a
+
+            DB_NAME="${POSTGRES_DB:-${DB_NAME}}"
+            DB_USER="${POSTGRES_USER:-${DB_USER}}"
+
+            CONTAINER_ID=$(docker compose -f "$APP_DIR/docker-compose.yml" ps -q db || true)
+            if [ -z "$CONTAINER_ID" ]; then
+              echo "PostgreSQL container is not running. Skipping backup."
+              exit 0
+            fi
+
+            docker exec -t "$CONTAINER_ID" pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$BACKUP_DIR/$FILE_NAME"
+            aws s3 cp "$BACKUP_DIR/$FILE_NAME" "s3://$BUCKET_NAME/$FILE_NAME"
+            rm -f "$BACKUP_DIR/$FILE_NAME"
+
+            echo "Database backup uploaded to s3://$BUCKET_NAME/$FILE_NAME"
+            EOF
+
+            sudo chmod +x /usr/local/bin/backup-discount-ecommerce-db.sh
+
+            CRONTAB_TMP=$(mktemp)
+            crontab -l 2>/dev/null > "$CRONTAB_TMP" || true
+
+            if ! grep -Fq "/usr/local/bin/backup-discount-ecommerce-db.sh" "$CRONTAB_TMP"; then
+              printf '\n0 0 * * * /usr/local/bin/backup-discount-ecommerce-db.sh >> /var/log/discount-ecommerce-db-backup.log 2>&1\n' >> "$CRONTAB_TMP"
+            fi
+
+            crontab "$CRONTAB_TMP"
+            rm -f "$CRONTAB_TMP"
+
+            echo "Backup cron job configured successfully."
+            crontab -l
