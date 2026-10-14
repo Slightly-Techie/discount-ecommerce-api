@@ -50,3 +50,6 @@ Thumbs.db
 
 # Node/npm (if any frontend assets)
 node_modules/  
+
+# TLS certificates/keys (generated locally or by generate-ssl.sh on the server)
+ssl/

@@ -16,7 +16,8 @@ RUN [ ! -f .env ] && cp sample_env .env || true
 
 # Add entrypoint script
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Strip Windows CRLF line endings (they break the shebang) and make executable
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 8000
 

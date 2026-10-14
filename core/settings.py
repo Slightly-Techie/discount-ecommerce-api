@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "api.category",
     "api.cart",
     "api.orders",
+    "api.notifications",
 ]
 
 MIDDLEWARE = [
@@ -174,7 +175,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "api.common.pagination.StandardPageNumberPagination",
     "PAGE_SIZE": 10,
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",

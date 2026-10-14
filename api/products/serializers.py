@@ -26,6 +26,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 
 class ProductReviewSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
+    product_name = serializers.CharField(source="product.name", read_only=True)
 
     class Meta:
         model = ProductReview
@@ -33,6 +34,7 @@ class ProductReviewSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "user_email",
+            "product_name",
             "rating",
             "review",
             "is_approved",
@@ -42,6 +44,7 @@ class ProductReviewSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "user_email",
+            "product_name",
             "is_approved",
             "created_at",
             "updated_at",

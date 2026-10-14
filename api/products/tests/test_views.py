@@ -78,3 +78,20 @@ def test_product_detail_not_found(api_client):
     )
     response = api_client.get(url)
     assert response.status_code == 404
+
+
+def test_admin_can_moderate_product_review(api_client, user_factory, product_review_factory):
+    review = product_review_factory(is_approved=False)
+    url = reverse("products:product-review-moderate", args=[review.id])
+
+    api_client.force_authenticate(user=user_factory())
+    assert api_client.patch(url, {"is_approved": True}, format="json").status_code == 403
+
+    api_client.force_authenticate(user=user_factory(role="admin"))
+    response = api_client.patch(url, {"is_approved": True}, format="json")
+    assert response.status_code == 200
+    assert response.data["is_approved"] is True
+    assert response.data["product_name"] == review.product.name
+
+    response = api_client.patch(url, {"is_approved": "false"}, format="json")
+    assert response.data["is_approved"] is False

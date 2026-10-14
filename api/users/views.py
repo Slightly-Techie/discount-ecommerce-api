@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from api.common.permissions import IsPlatformAdmin
 from api.common.utils import BASE_OTP_SECRET, generate_otp, send_email, verify_otp
 
 from .models import Address, Profile, User
@@ -351,7 +352,7 @@ class AdminUserListView(generics.ListAPIView):
         return User.objects.all().order_by("date_joined")
 
     serializer_class = AdminUserUpdateSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsPlatformAdmin]
     filterset_fields = [
         "email",
         "phonenumber",
@@ -371,13 +372,13 @@ class AdminUserUpdateView(generics.RetrieveUpdateAPIView):
         return User.objects.all()
 
     serializer_class = AdminUserUpdateSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsPlatformAdmin]
 
 
 class AdminUserDeactivateView(APIView):
     """Deactivate (soft-delete) a user account by admin."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsPlatformAdmin]
 
     @swagger_auto_schema(responses={200: "User account deactivated by admin."})
     def post(self, request, pk):

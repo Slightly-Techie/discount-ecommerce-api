@@ -1,25 +1,54 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Count, Sum
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework import filters, generics, permissions, status
+from rest_framework import filters, generics, mixins, permissions, status, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.cart.models import Cart, CartItem
 from api.common.permissions import IsAdminManagerOrApprovedVendorAdmin, IsAdminOrManager
+from api.products.models import Product, ProductReview
+from api.users.models import User
+from api.vendors.models import Vendor
 from api.common.utils import calculate_shipping, calculate_tax
 
-from .models import Order, OrderItem
+from .models import (
+    Country,
+    Coupon,
+    CouponUsage,
+    Order,
+    OrderItem,
+    OrderReview,
+    ShippingMethod,
+    ShippingZone,
+    TaxRate,
+    TaxZone,
+)
 from .serializers import (
+    AdminOrderSerializer,
     CheckoutRequestSerializer,
     CheckoutResponseSerializer,
     CheckoutResponseMultiOrderSerializer,
+    CountrySerializer,
+    CouponAdminSerializer,
+    CouponUsageSerializer,
     OrderReviewSerializer,
     OrderSerializer,
+    ShippingMethodSerializer,
+    ShippingZoneSerializer,
+    TaxRateSerializer,
+    TaxZoneSerializer,
 )
+
+
+def _is_platform_staff(user):
+    return user.is_authenticated and (
+        user.is_staff or getattr(user, "role", None) in ["admin", "manager"]
+    )
 
 # Create your views here.
 
@@ -200,9 +229,14 @@ class OrderListView(generics.ListAPIView):
         filters.SearchFilter,
         filters.OrderingFilter,
     ]
-    filterset_fields = ["status", "created_at"]
+    filterset_fields = ["status", "created_at", "vendor"]
     search_fields = ["tracking_number"]
     ordering_fields = ["created_at", "checked_out_at", "total"]
+
+    def get_serializer_class(self):
+        if _is_platform_staff(self.request.user):
+            return AdminOrderSerializer
+        return OrderSerializer
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -226,6 +260,11 @@ class OrderListView(generics.ListAPIView):
 class OrderDetailView(generics.RetrieveAPIView):
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if _is_platform_staff(self.request.user):
+            return AdminOrderSerializer
+        return OrderSerializer
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -287,3 +326,125 @@ class OrderReviewCreateView(generics.CreateAPIView):
         if order.user != user or order.status != Order.Status.DELIVERED:
             raise PermissionDenied("You can only review your own delivered orders.")
         serializer.save(user=user, order=order)
+
+
+# ---------------------------------------------------------------------------
+# Admin portal endpoints (mirror the Django admin for the frontend portal)
+# ---------------------------------------------------------------------------
+
+
+class AdminStatsView(APIView):
+    """Dashboard summary for platform admins/managers."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def get(self, request):
+        vendors_by_status = {
+            row["status"]: row["count"]
+            for row in Vendor.objects.values("status").annotate(count=Count("id"))
+        }
+        orders_by_status = {
+            row["status"]: row["count"]
+            for row in Order.objects.values("status").annotate(count=Count("id"))
+        }
+        revenue = Order.objects.filter(
+            status__in=[Order.Status.PAID, Order.Status.SHIPPED, Order.Status.DELIVERED]
+        ).aggregate(total=Sum("total"))["total"] or Decimal("0")
+        recent_orders = (
+            Order.objects.select_related("user", "vendor", "address", "coupon")
+            .prefetch_related("items", "reviews")
+            .order_by("-checked_out_at")[:5]
+        )
+        return Response(
+            {
+                "users": {
+                    "total": User.objects.count(),
+                    "active": User.objects.filter(is_active=True, is_deleted=False).count(),
+                },
+                "vendors": {
+                    "total": sum(vendors_by_status.values()),
+                    **{s: vendors_by_status.get(s, 0) for s in Vendor.Status.values},
+                },
+                "products": {
+                    "total": Product.objects.count(),
+                    "active": Product.objects.filter(
+                        is_deleted=False, status=Product.Status.ACTIVE
+                    ).count(),
+                },
+                "orders": {
+                    "total": sum(orders_by_status.values()),
+                    **{s: orders_by_status.get(s, 0) for s in Order.Status.values},
+                },
+                "revenue": str(Decimal(revenue).quantize(Decimal("0.01"))),
+                "pending_product_reviews": ProductReview.objects.filter(is_approved=False).count(),
+                "recent_orders": AdminOrderSerializer(recent_orders, many=True).data,
+            }
+        )
+
+
+class AdminCouponViewSet(viewsets.ModelViewSet):
+    queryset = Coupon.objects.all().order_by("-created_at")
+    serializer_class = CouponAdminSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    filterset_fields = ["active", "discount_type"]
+    search_fields = ["code"]
+    ordering_fields = ["created_at", "valid_from", "valid_to", "code"]
+
+
+class AdminCouponUsageViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = CouponUsage.objects.select_related("coupon", "user", "order").order_by("-used_at")
+    serializer_class = CouponUsageSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    filterset_fields = ["coupon", "user"]
+    search_fields = ["coupon__code", "user__email"]
+
+
+class AdminCountryViewSet(viewsets.ModelViewSet):
+    queryset = Country.objects.all().order_by("name")
+    serializer_class = CountrySerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    search_fields = ["code", "name"]
+
+
+class AdminShippingZoneViewSet(viewsets.ModelViewSet):
+    queryset = ShippingZone.objects.select_related("country").order_by("name")
+    serializer_class = ShippingZoneSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    filterset_fields = ["country", "is_remote"]
+    search_fields = ["name", "country__name"]
+
+
+class AdminShippingMethodViewSet(viewsets.ModelViewSet):
+    queryset = ShippingMethod.objects.select_related("zone").order_by("zone__name", "name")
+    serializer_class = ShippingMethodSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    filterset_fields = ["zone", "active"]
+    search_fields = ["name", "zone__name"]
+
+
+class AdminTaxZoneViewSet(viewsets.ModelViewSet):
+    queryset = TaxZone.objects.select_related("country").order_by("name")
+    serializer_class = TaxZoneSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    filterset_fields = ["country", "active"]
+    search_fields = ["name", "country__name"]
+
+
+class AdminTaxRateViewSet(viewsets.ModelViewSet):
+    queryset = TaxRate.objects.select_related("zone").order_by("zone__name", "-start_date")
+    serializer_class = TaxRateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    filterset_fields = ["zone", "active"]
+
+
+class AdminOrderReviewViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = OrderReview.objects.select_related("user", "order").order_by("-created_at")
+    serializer_class = OrderReviewSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    filterset_fields = ["rating", "order"]
+    search_fields = ["review", "user__email"]

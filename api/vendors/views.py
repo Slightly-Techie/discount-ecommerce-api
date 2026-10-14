@@ -1,14 +1,19 @@
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.common.permissions import IsAdminOrManager
+from api.notifications.services import (
+    notify_admins_vendor_signup,
+    notify_vendor_status_change,
+)
 from api.vendors.models import Vendor
 
 from .serializers import (
     VendorAdminSignupResponseSerializer,
+    VendorAdminSerializer,
     VendorAdminSignupSerializer,
     VendorSerializer,
     VendorUpdateSerializer,
@@ -36,6 +41,7 @@ class VendorAdminSignupView(generics.CreateAPIView):
 
         user = payload["user"]
         vendor = payload["vendor"]
+        notify_admins_vendor_signup(vendor, user)
         response = {
             "user": {
                 "id": str(user.id),
@@ -85,15 +91,15 @@ class VendorMeView(generics.RetrieveUpdateAPIView):
         return Response(VendorSerializer(vendor, context={"request": request}).data)
 
 class VendorDetailView(generics.RetrieveUpdateAPIView):
-    serializer_class = VendorSerializer
+    serializer_class = VendorAdminSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
-    parser_classes = [MultiPartParser, FormParser]
-    queryset = Vendor.objects.all()
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    queryset = Vendor.objects.prefetch_related("admins")
 
     def get_serializer_class(self):
         if self.request.method in ["PUT", "PATCH"]:
             return VendorUpdateSerializer
-        return VendorSerializer
+        return VendorAdminSerializer
 
 class VendorListView(generics.ListAPIView):
     """
@@ -108,11 +114,19 @@ class VendorListView(generics.ListAPIView):
     search_fields = ["name", "slug"]
     ordering_fields = ["created_at", "updated_at", "name"]
 
+    def _is_platform_staff(self):
+        user = self.request.user
+        return user.is_authenticated and (user.is_staff or getattr(user, "role", None) in ["admin", "manager"])
+
+    def get_serializer_class(self):
+        if self._is_platform_staff():
+            return VendorAdminSerializer
+        return VendorSerializer
+
     def get_queryset(self):
         qs = Vendor.objects.all().order_by("-created_at")
-        user = self.request.user
-        if user.is_authenticated and (user.is_staff or getattr(user, "role", None) in ["admin", "manager"]):
-            return qs
+        if self._is_platform_staff():
+            return qs.prefetch_related("admins")
         return qs.filter(status=Vendor.Status.APPROVED)
 
 
@@ -127,6 +141,7 @@ class VendorApproveView(APIView):
         vendor.status = Vendor.Status.APPROVED
         vendor.rejection_reason = None
         vendor.save(update_fields=["status", "rejection_reason", "updated_at"])
+        notify_vendor_status_change(vendor)
         return Response({"detail": "Vendor approved."})
 
 
@@ -142,6 +157,7 @@ class VendorRejectView(APIView):
         vendor.status = Vendor.Status.REJECTED
         vendor.rejection_reason = reason or ""
         vendor.save(update_fields=["status", "rejection_reason", "updated_at"])
+        notify_vendor_status_change(vendor)
         return Response({"detail": "Vendor rejected.", "rejection_reason": vendor.rejection_reason})
 
 
@@ -155,5 +171,6 @@ class VendorSuspendView(APIView):
             return Response({"detail": "Vendor not found."}, status=404)
         vendor.status = Vendor.Status.SUSPENDED
         vendor.save(update_fields=["status", "updated_at"])
+        notify_vendor_status_change(vendor)
         return Response({"detail": "Vendor suspended."})
 

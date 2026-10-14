@@ -516,3 +516,34 @@ class TestVendorModelMethods:
         """Test vendor default status is pending."""
         vendor = Vendor.objects.create(name="New Store")
         assert vendor.status == Vendor.Status.PENDING
+
+
+class TestVendorAdminFields:
+    """Owner details are exposed to platform admins only."""
+
+    def test_admin_list_includes_owners(self, api_client, user_factory, vendor_factory):
+        vendor = vendor_factory(status=Vendor.Status.PENDING)
+        owner = user_factory(role="vendor_admin", vendor=vendor)
+        api_client.force_authenticate(user=user_factory(role="admin"))
+
+        response = api_client.get(reverse("vendors:vendor-list"), {"status": "pending"})
+
+        row = next(v for v in response.data["results"] if v["id"] == str(vendor.id))
+        assert row["owners"][0]["email"] == owner.email
+
+    def test_public_list_hides_owners(self, api_client, vendor_factory, user_factory):
+        vendor = vendor_factory(status=Vendor.Status.APPROVED)
+        user_factory(role="vendor_admin", vendor=vendor)
+
+        response = api_client.get(reverse("vendors:vendor-list"))
+
+        assert "owners" not in response.data["results"][0]
+
+    def test_admin_can_patch_vendor_with_json(self, api_client, user_factory, vendor):
+        api_client.force_authenticate(user=user_factory(role="admin"))
+        response = api_client.patch(
+            reverse("vendors:vendor-detail", args=[vendor.id]), {"phone": "+233201111111"}, format="json"
+        )
+        assert response.status_code == 200
+        vendor.refresh_from_db()
+        assert vendor.phone == "+233201111111"

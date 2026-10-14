@@ -172,6 +172,14 @@ class PhoneVerificationConfirmSerializer(serializers.Serializer):
 class AdminUserUpdateSerializer(serializers.ModelSerializer):
     """Serializer for admin/staff to update user details."""
 
+    vendor = serializers.SerializerMethodField()
+
+    def get_vendor(self, obj):
+        if not getattr(obj, "vendor_id", None):
+            return None
+        v = obj.vendor
+        return {"id": str(v.id), "name": v.name, "status": v.status}
+
     class Meta:
         model = User
         fields = [
@@ -187,4 +195,8 @@ class AdminUserUpdateSerializer(serializers.ModelSerializer):
             "role",
             "is_deleted",
             "metadata",
+            "vendor",
+            "date_joined",
+            "last_login",
         ]
+        read_only_fields = ["vendor", "date_joined", "last_login"]
