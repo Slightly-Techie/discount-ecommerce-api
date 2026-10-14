@@ -9,6 +9,7 @@ from .views import (
     ProductListCreateView,
     ProductRetrieveView,
     ProductReviewListCreateTopView,
+    ProductReviewModerateView,
     ProductReviewRetrieveUpdateDestroyTopView,
     ProductVariantListCreateTopView,
     ProductVariantRetrieveUpdateDestroyTopView,
@@ -58,5 +59,10 @@ urlpatterns = [
         "reviews/<uuid:pk>/",
         ProductReviewRetrieveUpdateDestroyTopView.as_view(),
         name="product-review-detail",
+    ),
+    path(
+        "reviews/<uuid:pk>/moderate/",
+        ProductReviewModerateView.as_view(),
+        name="product-review-moderate",
     ),
 ]

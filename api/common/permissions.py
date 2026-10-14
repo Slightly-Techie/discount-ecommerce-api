@@ -12,6 +12,17 @@ class IsAdminOrManager(permissions.BasePermission):
         )
 
 
+class IsPlatformAdmin(permissions.BasePermission):
+    """Allows access only to platform admins (role=admin, staff or superuser). Excludes managers."""
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and (
+            getattr(request.user, "role", None) == "admin"
+            or request.user.is_staff
+            or request.user.is_superuser
+        )
+
+
 class IsVendorAdmin(permissions.BasePermission):
     """Allows access only to vendor admin users."""
 

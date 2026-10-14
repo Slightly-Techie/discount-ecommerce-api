@@ -25,6 +25,27 @@ class VendorSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "slug", "status", "rejection_reason", "created_at", "updated_at"]
 
+class VendorAdminSerializer(VendorSerializer):
+    """Vendor details for platform admins, including the user(s) who own the vendor."""
+
+    owners = serializers.SerializerMethodField()
+
+    def get_owners(self, obj):
+        return [
+            {
+                "id": str(u.id),
+                "email": u.email,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "phonenumber": u.phonenumber,
+            }
+            for u in obj.admins.all()
+        ]
+
+    class Meta(VendorSerializer.Meta):
+        fields = VendorSerializer.Meta.fields + ["owners"]
+
+
 class VendorUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = VendorModel

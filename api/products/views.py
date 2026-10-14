@@ -3,6 +3,7 @@ from io import StringIO
 
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
+from rest_framework.fields import BooleanField
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -393,3 +394,18 @@ class ProductReviewRetrieveUpdateDestroyTopView(generics.RetrieveUpdateDestroyAP
         if self.request.method in ["PUT", "PATCH", "DELETE"]:
             return [IsAdminOrManager()]
         return [permissions.AllowAny()]
+
+
+class ProductReviewModerateView(APIView):
+    """Approve or unapprove a product review (admin/manager only)."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def patch(self, request, pk):
+        try:
+            review = ProductReview.objects.select_related("user", "product").get(pk=pk)
+        except ProductReview.DoesNotExist:
+            return Response({"detail": "Review not found."}, status=status.HTTP_404_NOT_FOUND)
+        review.is_approved = BooleanField().to_internal_value(request.data.get("is_approved", True))
+        review.save(update_fields=["is_approved", "updated_at"])
+        return Response(ProductReviewSerializer(review).data)
