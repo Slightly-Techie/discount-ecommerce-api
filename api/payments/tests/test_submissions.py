@@ -222,10 +222,13 @@ def test_screenshot_not_visible_to_other_users(
     assert own.status_code == 200
     assert "no-store" in own["Cache-Control"]
     assert own["X-Content-Type-Options"] == "nosniff"
+    own.close()
     api_client.force_authenticate(user=user_factory())
     assert api_client.get(url).status_code == 404
     api_client.force_authenticate(user=user_factory(role="manager"))
-    assert api_client.get(url).status_code == 200
+    manager = api_client.get(url)
+    assert manager.status_code == 200
+    manager.close()
 
 
 def test_list_shows_only_own_submissions(api_client, user, payment_submission_factory):
