@@ -140,6 +140,44 @@ def test_submission_made_after_validation_is_caught_at_save(
     assert PaymentSubmission.objects.count() == 1
 
 
+def test_order_paid_after_validation_is_caught_at_save(
+    user, checkout_orders, payment_account_factory
+):
+    # Simulates an order leaving "pending" between validate() and save().
+    serializer = PaymentSubmissionCreateSerializer(
+        data=payload(
+            payment_account_factory(),
+            checkout_group=str(checkout_orders[0].checkout_group),
+        ),
+        context={"request": SimpleNamespace(user=user)},
+    )
+    assert serializer.is_valid(), serializer.errors
+    checkout_orders[1].status = "paid"
+    checkout_orders[1].save()
+
+    with pytest.raises(ValidationError, match="Only orders awaiting payment"):
+        serializer.save()
+    assert PaymentSubmission.objects.count() == 0
+
+
+def test_checkout_group_and_order_ids_together_are_refused(
+    api_client, user, checkout_orders, payment_account_factory
+):
+    api_client.force_authenticate(user=user)
+    response = api_client.post(
+        reverse("payments:submission-list"),
+        payload(
+            payment_account_factory(),
+            checkout_group=str(checkout_orders[0].checkout_group),
+            order_ids=[str(checkout_orders[0].id)],
+        ),
+        format="multipart",
+    )
+    assert response.status_code == 400
+    assert "Send either checkout_group or order_ids, not both." in str(response.data)
+    assert PaymentSubmission.objects.count() == 0
+
+
 def test_can_resubmit_after_rejection(
     api_client,
     user,

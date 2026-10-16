@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from api.cart.models import Cart, CartItem
 from api.common.permissions import IsAdminManagerOrApprovedVendorAdmin, IsAdminOrManager
+from api.payments.models import PaymentSubmission
 from api.products.models import Product, ProductReview
 from api.users.models import User
 from api.vendors.models import Vendor
@@ -32,7 +33,6 @@ from .models import (
 from .serializers import (
     AdminOrderSerializer,
     CheckoutRequestSerializer,
-    CheckoutResponseSerializer,
     CheckoutResponseMultiOrderSerializer,
     CountrySerializer,
     CouponAdminSerializer,
@@ -290,6 +290,22 @@ class OrderStatusUpdateView(APIView):
                 if order.vendor_id != getattr(request.user, "vendor_id", None):
                     return Response({"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
             new_status = request.data.get("status")
+            if new_status == Order.Status.PAID:
+                if getattr(request.user, "role", None) == "vendor_admin":
+                    return Response(
+                        {"detail": "Payments are confirmed by GrottoMore in the payments queue."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                if order.payment_submissions.filter(
+                    status=PaymentSubmission.Status.SUBMITTED
+                ).exists():
+                    return Response(
+                        {
+                            "detail": "This order has a payment under review — "
+                            "confirm it in the payments queue."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             tracking_number = request.data.get("tracking_number")
             admin_note = request.data.get("admin_note")
             if tracking_number is not None:

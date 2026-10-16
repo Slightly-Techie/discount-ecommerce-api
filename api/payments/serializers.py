@@ -96,6 +96,10 @@ class PaymentSubmissionCreateSerializer(serializers.Serializer):
         user = self.context["request"].user
         group = attrs.get("checkout_group")
         ids = attrs.get("order_ids")
+        if group and ids:
+            raise serializers.ValidationError(
+                {"detail": "Send either checkout_group or order_ids, not both."}
+            )
         if group:
             orders = list(
                 Order.objects.filter(
@@ -131,7 +135,13 @@ class PaymentSubmissionCreateSerializer(serializers.Serializer):
         orders = validated_data.pop("orders")
         # Runs inside the view's transaction: lock the orders so two concurrent
         # submissions for the same checkout can't both pass the review check.
-        list(Order.objects.select_for_update().filter(id__in=[o.id for o in orders]))
+        locked = list(
+            Order.objects.select_for_update().filter(id__in=[o.id for o in orders])
+        )
+        if any(o.status != Order.Status.PENDING for o in locked):
+            raise serializers.ValidationError(
+                {"detail": "Only orders awaiting payment can be paid for."}
+            )
         if _under_review(orders):
             raise serializers.ValidationError(
                 {"detail": "Payment for this order is already under review."}
