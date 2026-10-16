@@ -32,6 +32,16 @@ class PaymentAccountSerializer(serializers.ModelSerializer):
             "sort_order",
         ]
         read_only_fields = ["id"]
+        extra_kwargs = {
+            "branch": {"allow_null": True},
+            "instructions": {"allow_null": True},
+        }
+
+    def validate_branch(self, value):
+        return "" if value is None else value
+
+    def validate_instructions(self, value):
+        return "" if value is None else value
 
 
 class PaymentSubmissionSerializer(serializers.ModelSerializer):

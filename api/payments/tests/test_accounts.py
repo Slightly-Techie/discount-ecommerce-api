@@ -1,6 +1,8 @@
 import pytest
 from django.urls import reverse
 
+from api.payments.models import PaymentAccount
+
 pytestmark = pytest.mark.django_db
 
 NEW_ACCOUNT = {
@@ -56,3 +58,34 @@ def test_deleting_used_account_returns_409(
     response = api_client.delete(url)
     assert response.status_code == 409
     assert "Hide it instead" in response.data["detail"]
+
+
+def test_admin_can_create_account_with_null_optional_text_fields(
+    api_client, user_factory
+):
+    api_client.force_authenticate(user=user_factory(role="admin"))
+    payload = {
+        **NEW_ACCOUNT,
+        "branch": None,
+        "instructions": "Use your order number as the reference",
+        "sort_order": 0,
+        "is_active": True,
+    }
+    response = api_client.post(
+        reverse("payments:admin-account-list"), payload, format="json"
+    )
+    assert response.status_code == 201
+    created = PaymentAccount.objects.get(id=response.data["id"])
+    assert created.branch == ""
+
+
+def test_admin_can_patch_instructions_to_null(
+    api_client, user_factory, payment_account_factory
+):
+    account = payment_account_factory(instructions="Old instructions")
+    api_client.force_authenticate(user=user_factory(role="admin"))
+    url = reverse("payments:admin-account-detail", args=[account.id])
+    response = api_client.patch(url, {"instructions": None}, format="json")
+    assert response.status_code == 200
+    account.refresh_from_db()
+    assert account.instructions == ""
