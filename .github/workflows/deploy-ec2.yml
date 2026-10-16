@@ -77,7 +77,12 @@ jobs:
       - name: Deploy application on EC2
         if: steps.secrets.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
         with:
+          # Forwarded as an environment variable: inlining the env file into the
+          # script broke bash on any quote or parenthesis in a value.
+          envs: PROD_ENV_FILE
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
@@ -130,14 +135,12 @@ jobs:
               sudo chmod 644 ssl/cert.pem
             fi
 
-            if [ -z "${{ secrets.PROD_ENV_FILE }}" ]; then
+            if [ -z "${PROD_ENV_FILE:-}" ]; then
               echo "ERROR: PROD_ENV_FILE secret is required."
               exit 1
             fi
 
-            cat > .env <<'ENVFILE'
-            ${{ secrets.PROD_ENV_FILE }}
-            ENVFILE
+            printf '%s\n' "$PROD_ENV_FILE" > .env
 
             printf "\nRUN_MIGRATIONS_ON_STARTUP=true\nRUN_COLLECTSTATIC_ON_STARTUP=false\n" >> .env
             sudo chmod 600 .env
