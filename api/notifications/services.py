@@ -94,3 +94,30 @@ def notify_vendor_status_change(vendor):
     if owners:
         send_email(title, message, [o.email for o in owners])
     return notifications
+
+
+def notify_admins_payment_submitted(submission):
+    """Tell every platform admin there's a payment to check against the statement."""
+    admins = list(get_platform_admins())
+    if not admins:
+        return []
+    shopper = submission.user
+    name = f"{shopper.first_name} {shopper.last_name}".strip() or shopper.email
+    title = f"Payment to review: GH₵ {submission.amount_expected:,.2f}"
+    message = (
+        f"{name} says they paid GH₵ {submission.amount_expected:,.2f} into "
+        f"{submission.account} (reference {submission.reference})."
+    )
+    notifications = Notification.objects.bulk_create(
+        [
+            Notification(
+                recipient=admin,
+                type=Notification.Type.PAYMENT_SUBMITTED,
+                title=title,
+                message=message,
+            )
+            for admin in admins
+        ]
+    )
+    send_email(title, message, [a.email for a in admins])
+    return notifications

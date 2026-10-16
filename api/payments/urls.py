@@ -18,4 +18,14 @@ urlpatterns = [
         views.AdminPaymentAccountDetailView.as_view(),
         name="admin-account-detail",
     ),
+    path(
+        "submissions/",
+        views.PaymentSubmissionListCreateView.as_view(),
+        name="submission-list",
+    ),
+    path(
+        "submissions/<uuid:pk>/screenshot/",
+        views.PaymentScreenshotView.as_view(),
+        name="submission-screenshot",
+    ),
 ]
