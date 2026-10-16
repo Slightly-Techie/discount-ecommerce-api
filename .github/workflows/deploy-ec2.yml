@@ -1,28 +1,81 @@
-name: Deploy to EC2
+name: Test and deploy to EC2
 
+# Pull requests run the tests. Every push to master runs the tests and, if they
+# pass and the EC2 secrets are configured, deploys the API. "Run workflow"
+# deploys by hand.
 on:
-  # push:
-  #   branches:
-  #     - main
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Queue deploys instead of cancelling one halfway through a migration.
 concurrency:
   group: production-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy to production EC2
+  test:
+    name: Run tests
     runs-on: ubuntu-latest
-
+    env:
+      DEBUG: "True"
+      SECRET_KEY: ci-only-not-secret
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: sqlite:///ci-test.sqlite3
+      BASE_OTP_SECRET: JBSWY3DPEHPK3PXP
+      EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+      USE_S3: "False"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r dev-requirements.txt
+
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run tests
+        run: python -m pytest -q -p no:cacheprovider --create-db
+
+  deploy:
+    name: Deploy to production EC2
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check deploy secrets
+        id: secrets
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          if [ -z "$EC2_HOST" ]; then
+            echo "::notice::EC2_HOST is not set, so the deploy is skipped. Add the EC2 secrets to enable it."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
       - name: Deploy application on EC2
+        if: steps.secrets.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
