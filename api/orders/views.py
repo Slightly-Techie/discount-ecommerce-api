@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 from django.db import transaction
@@ -150,6 +151,7 @@ class CheckoutView(APIView):
                 else:
                     discounts_by_vendor = {vendor_id: Decimal("0") for vendor_id in subtotals_by_vendor.keys()}
 
+                checkout_group = uuid.uuid4()
                 created_orders = []
                 shipping_warning = None
 
@@ -176,6 +178,7 @@ class CheckoutView(APIView):
                         tax=tax,
                         shipping=shipping,
                         coupon=coupon,
+                        checkout_group=checkout_group,
                     )
                     for item in items:
                         price = item.product.current_price()

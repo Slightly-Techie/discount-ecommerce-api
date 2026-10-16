@@ -144,6 +144,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "shipping",
             "coupon",
             "checked_out_at",
+            "checkout_group",
             "tracking_number",
             "items",
             "reviews",

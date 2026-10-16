@@ -437,3 +437,20 @@ def test_checkout_charges_live_discount_price(
     item = order.items.get()
     assert item.price == Decimal("200.00")
     assert order.total == Decimal("400.00") + order.shipping + order.tax - order.discount
+
+
+def test_checkout_tags_every_vendor_order_with_one_group(
+    api_client, user, address, cart, product_factory, cart_item_factory, vendor_factory
+):
+    first = product_factory(vendor=vendor_factory(), stock=5)
+    second = product_factory(vendor=vendor_factory(), stock=5)
+    cart_item_factory(cart=cart, product=first)
+    cart_item_factory(cart=cart, product=second)
+    api_client.force_authenticate(user=user)
+
+    response = api_client.post(reverse("orders:checkout"), {})
+
+    assert response.status_code == 201
+    groups = {o["checkout_group"] for o in response.data["orders"]}
+    assert len(groups) == 1 and None not in groups
+    assert Order.objects.filter(user=user, checkout_group=groups.pop()).count() == 2
