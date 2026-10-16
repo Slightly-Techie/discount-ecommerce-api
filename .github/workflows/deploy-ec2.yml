@@ -111,17 +111,19 @@ jobs:
             cd "$APP_DIR"
             sudo mkdir -p ssl
 
-            if [ ! -f "ssl/live/$SSL_DOMAIN/fullchain.pem" ] || [ ! -f "ssl/live/$SSL_DOMAIN/privkey.pem" ]; then
+            # certbot's live/ folder is root-only (0700), so check it with sudo; as the
+            # SSH user the certificate would look missing and trigger a new request.
+            if ! sudo test -f "ssl/live/$SSL_DOMAIN/fullchain.pem" || ! sudo test -f "ssl/live/$SSL_DOMAIN/privkey.pem"; then
               sudo chmod +x generate-ssl.sh
               sudo ./generate-ssl.sh "$SSL_DOMAIN" "$SSL_EMAIL"
             fi
 
-            if [ ! -f "ssl/live/$SSL_DOMAIN/fullchain.pem" ] || [ ! -f "ssl/live/$SSL_DOMAIN/privkey.pem" ]; then
+            if ! sudo test -f "ssl/live/$SSL_DOMAIN/fullchain.pem" || ! sudo test -f "ssl/live/$SSL_DOMAIN/privkey.pem"; then
               echo "ERROR: SSL certificate generation failed for $SSL_DOMAIN."
               exit 1
             fi
 
-            if [ ! -f "ssl/cert.pem" ] || [ ! -f "ssl/key.pem" ]; then
+            if ! sudo test -f "ssl/cert.pem" || ! sudo test -f "ssl/key.pem"; then
               sudo cp "ssl/live/$SSL_DOMAIN/fullchain.pem" ssl/cert.pem
               sudo cp "ssl/live/$SSL_DOMAIN/privkey.pem" ssl/key.pem
               sudo chmod 600 ssl/key.pem
