@@ -121,3 +121,27 @@ def notify_admins_payment_submitted(submission):
     )
     send_email(title, message, [a.email for a in admins])
     return notifications
+
+
+def notify_payment_reviewed(submission):
+    """Tell the shopper their payment was confirmed, or rejected and why."""
+    confirmed = submission.status == "confirmed"
+    amount = f"GH₵ {submission.amount_expected:,.2f}"
+    if confirmed:
+        notif_type = Notification.Type.PAYMENT_CONFIRMED
+        title = "Payment confirmed"
+        message = f"We received your payment of {amount}. Your order is being prepared."
+    else:
+        notif_type = Notification.Type.PAYMENT_REJECTED
+        title = "We couldn't confirm your payment"
+        message = (
+            f"We couldn't match your payment of {amount} "
+            f"(reference {submission.reference}). "
+            f"Reason: {submission.rejection_reason} "
+            "You can submit the details again from your order."
+        )
+    notification = Notification.objects.create(
+        recipient=submission.user, type=notif_type, title=title, message=message
+    )
+    send_email(title, message, [submission.user.email])
+    return notification

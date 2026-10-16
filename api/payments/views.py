@@ -3,16 +3,22 @@ import mimetypes
 from django.db import transaction
 from django.db.models import ProtectedError
 from django.http import FileResponse, Http404
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.common.permissions import IsAdminOrManager, IsPlatformAdmin
-from api.notifications.services import notify_admins_payment_submitted
+from api.notifications.services import (
+    notify_admins_payment_submitted,
+    notify_payment_reviewed,
+)
+from api.orders.models import Order
 
 from .models import PaymentAccount, PaymentSubmission
 from .serializers import (
+    AdminPaymentSubmissionSerializer,
     PaymentAccountSerializer,
     PaymentSubmissionCreateSerializer,
     PaymentSubmissionSerializer,
@@ -109,3 +115,83 @@ class PaymentScreenshotView(APIView):
         response["Cache-Control"] = "private, no-store"
         response["X-Content-Type-Options"] = "nosniff"
         return response
+
+
+class AdminPaymentSubmissionListView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+    serializer_class = AdminPaymentSubmissionSerializer
+    filterset_fields = ["status"]
+    search_fields = ["reference", "sender_name", "user__email"]
+    queryset = PaymentSubmission.objects.select_related(
+        "user", "account"
+    ).prefetch_related("orders")
+
+
+class _ReviewView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def _locked_submission(self, pk):
+        submission = PaymentSubmission.objects.select_for_update().filter(pk=pk).first()
+        if submission is None:
+            raise Http404
+        return submission
+
+    def _already_reviewed(self):
+        return Response(
+            {"detail": "This payment has already been reviewed."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def _done(self, request, submission):
+        notify_payment_reviewed(submission)
+        return Response(
+            AdminPaymentSubmissionSerializer(
+                submission, context={"request": request}
+            ).data
+        )
+
+
+class ConfirmPaymentView(_ReviewView):
+    def post(self, request, pk):
+        with transaction.atomic():
+            submission = self._locked_submission(pk)
+            if submission.status != PaymentSubmission.Status.SUBMITTED:
+                return self._already_reviewed()
+            orders = list(submission.orders.select_for_update())
+            blocked = [o for o in orders if not o.can_transition(Order.Status.PAID)]
+            if blocked:
+                o = blocked[0]
+                return Response(
+                    {
+                        "detail": f"Order {str(o.id)[:8].upper()} is "
+                        f"{o.get_status_display().lower()} and can't be marked paid."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            for order in orders:
+                order.set_status(Order.Status.PAID)
+            submission.status = PaymentSubmission.Status.CONFIRMED
+            submission.reviewed_by = request.user
+            submission.reviewed_at = timezone.now()
+            submission.save()
+        return self._done(request, submission)
+
+
+class RejectPaymentView(_ReviewView):
+    def post(self, request, pk):
+        reason = (request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {"reason": ["Give a reason so the shopper knows what to fix."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            submission = self._locked_submission(pk)
+            if submission.status != PaymentSubmission.Status.SUBMITTED:
+                return self._already_reviewed()
+            submission.status = PaymentSubmission.Status.REJECTED
+            submission.rejection_reason = reason
+            submission.reviewed_by = request.user
+            submission.reviewed_at = timezone.now()
+            submission.save()
+        return self._done(request, submission)

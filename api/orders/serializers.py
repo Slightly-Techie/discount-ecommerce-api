@@ -122,6 +122,13 @@ class OrderSerializer(serializers.ModelSerializer):
     coupon = CouponSerializer(read_only=True)
     vendor = serializers.SerializerMethodField()
     user_email = serializers.EmailField(source="user.email", read_only=True)
+    payment = serializers.SerializerMethodField()
+
+    def get_payment(self, obj):
+        latest = obj.payment_submissions.order_by("-created_at").first()
+        if latest is None:
+            return None
+        return {"status": latest.status, "rejection_reason": latest.rejection_reason}
 
     def get_vendor(self, obj):
         if not getattr(obj, "vendor_id", None):
@@ -148,6 +155,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "tracking_number",
             "items",
             "reviews",
+            "payment",
             "created_at",
             "updated_at",
         ]

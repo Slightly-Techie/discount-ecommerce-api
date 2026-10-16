@@ -135,3 +135,26 @@ class PaymentSubmissionCreateSerializer(serializers.Serializer):
         )
         submission.orders.set(orders)
         return submission
+
+
+class AdminPaymentSubmissionSerializer(PaymentSubmissionSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_name = serializers.SerializerMethodField()
+    order_details = serializers.SerializerMethodField()
+
+    class Meta(PaymentSubmissionSerializer.Meta):
+        fields = PaymentSubmissionSerializer.Meta.fields + [
+            "user_email",
+            "user_name",
+            "order_details",
+        ]
+        read_only_fields = fields
+
+    def get_user_name(self, obj):
+        return f"{obj.user.first_name} {obj.user.last_name}".strip()
+
+    def get_order_details(self, obj):
+        return [
+            {"id": str(o.id), "total": str(o.total), "status": o.status}
+            for o in obj.orders.all()
+        ]

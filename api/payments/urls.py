@@ -28,4 +28,19 @@ urlpatterns = [
         views.PaymentScreenshotView.as_view(),
         name="submission-screenshot",
     ),
+    path(
+        "admin/submissions/",
+        views.AdminPaymentSubmissionListView.as_view(),
+        name="admin-submission-list",
+    ),
+    path(
+        "admin/submissions/<uuid:pk>/confirm/",
+        views.ConfirmPaymentView.as_view(),
+        name="admin-submission-confirm",
+    ),
+    path(
+        "admin/submissions/<uuid:pk>/reject/",
+        views.RejectPaymentView.as_view(),
+        name="admin-submission-reject",
+    ),
 ]
