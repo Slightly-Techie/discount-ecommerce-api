@@ -16,6 +16,6 @@ def validate_screenshot(file):
 
 
 def screenshot_upload_to(instance, filename):
-    """Random file name so a proof's storage path can't be guessed from the original name."""
+    """Random file name, so a proof's storage path cannot be guessed from the upload."""
     ext = os.path.splitext(filename)[1].lower() or ".jpg"
     return f"payment_proofs/{uuid.uuid4().hex}{ext}"
