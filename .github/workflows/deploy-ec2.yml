@@ -35,7 +35,7 @@ jobs:
 
             APP_DIR="${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/opt/discount-ecommerce-api' }}"
             GIT_REPO="${{ secrets.EC2_GIT_REPO != '' && secrets.EC2_GIT_REPO || 'https://github.com/Slightly-Techie/discount-ecommerce-api.git' }}"
-            GIT_BRANCH="${{ secrets.EC2_GIT_BRANCH != '' && secrets.EC2_GIT_BRANCH || 'main' }}"
+            GIT_BRANCH="${{ secrets.EC2_GIT_BRANCH != '' && secrets.EC2_GIT_BRANCH || 'master' }}"
             SSL_DOMAIN="${{ secrets.EC2_SSL_DOMAIN != '' && secrets.EC2_SSL_DOMAIN || 'api.grottomore.com' }}"
             SSL_EMAIL="${{ secrets.EC2_SSL_EMAIL != '' && secrets.EC2_SSL_EMAIL || 'admin@api.grottomore.com' }}"
 
