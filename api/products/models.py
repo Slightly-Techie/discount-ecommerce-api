@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 from api.common.models import BaseModel
@@ -62,6 +63,18 @@ class Product(BaseModel):
 
     def __str__(self):
         return self.name
+
+    def current_price(self, now=None):
+        """What the shopper pays now: the discount price while its window is open, else the price."""
+        now = now or timezone.now()
+        if (
+            self.discount_price is not None
+            and self.discount_price < self.price
+            and (self.discount_start is None or self.discount_start <= now)
+            and (self.discount_end is None or now <= self.discount_end)
+        ):
+            return self.discount_price
+        return self.price
 
 
 class ProductImage(BaseModel):

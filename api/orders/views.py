@@ -111,7 +111,7 @@ class CheckoutView(APIView):
                 for vendor_id, items in items_by_vendor.items():
                     vendor_subtotal = Decimal("0")
                     for item in items:
-                        vendor_subtotal += item.product.price * item.quantity
+                        vendor_subtotal += item.product.current_price() * item.quantity
                     subtotals_by_vendor[vendor_id] = vendor_subtotal
                     total_subtotal += vendor_subtotal
 
@@ -178,7 +178,7 @@ class CheckoutView(APIView):
                         coupon=coupon,
                     )
                     for item in items:
-                        price = item.product.price
+                        price = item.product.current_price()
                         OrderItem.objects.create(
                             order=order,
                             product=item.product,

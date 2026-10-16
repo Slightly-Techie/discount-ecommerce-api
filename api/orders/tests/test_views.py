@@ -419,3 +419,21 @@ def test_checkout_different_country_with_shipping_and_tax(
     order = Order.objects.get(user=user)
     assert order.shipping == 15
     assert order.tax > 0
+
+
+def test_checkout_charges_live_discount_price(
+    api_client, user, address, cart, product_factory, cart_item_factory
+):
+    from decimal import Decimal
+
+    product = product_factory(price=Decimal("250.00"), discount_price=Decimal("200.00"), stock=5)
+    cart_item_factory(cart=cart, product=product, quantity=2)
+    api_client.force_authenticate(user=user)
+
+    response = api_client.post(reverse("orders:checkout"), {})
+
+    assert response.status_code == 201
+    order = Order.objects.get(user=user)
+    item = order.items.get()
+    assert item.price == Decimal("200.00")
+    assert order.total == Decimal("400.00") + order.shipping + order.tax - order.discount
