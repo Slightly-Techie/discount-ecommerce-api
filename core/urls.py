@@ -67,6 +67,7 @@ urlpatterns = [
     path("api/cart/", include("api.cart.urls")),
     path("api/orders/", include("api.orders.urls")),
     path("api/notifications/", include("api.notifications.urls")),
+    path("api/payments/", include("api.payments.urls")),
     path("api/auth/", include(auth_urlpatterns)),
     path("api/test-protected/", TestProtectedView.as_view(), name="test_protected"),
 ]
