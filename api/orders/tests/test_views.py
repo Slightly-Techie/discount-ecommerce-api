@@ -419,3 +419,96 @@ def test_checkout_different_country_with_shipping_and_tax(
     order = Order.objects.get(user=user)
     assert order.shipping == 15
     assert order.tax > 0
+
+
+def test_checkout_charges_live_discount_price(
+    api_client, user, address, cart, product_factory, cart_item_factory
+):
+    from decimal import Decimal
+
+    product = product_factory(price=Decimal("250.00"), discount_price=Decimal("200.00"), stock=5)
+    cart_item_factory(cart=cart, product=product, quantity=2)
+    api_client.force_authenticate(user=user)
+
+    response = api_client.post(reverse("orders:checkout"), {})
+
+    assert response.status_code == 201
+    order = Order.objects.get(user=user)
+    item = order.items.get()
+    assert item.price == Decimal("200.00")
+    assert order.total == Decimal("400.00") + order.shipping + order.tax - order.discount
+
+
+def test_checkout_tags_every_vendor_order_with_one_group(
+    api_client, user, address, cart, product_factory, cart_item_factory, vendor_factory
+):
+    first = product_factory(vendor=vendor_factory(), stock=5)
+    second = product_factory(vendor=vendor_factory(), stock=5)
+    cart_item_factory(cart=cart, product=first)
+    cart_item_factory(cart=cart, product=second)
+    api_client.force_authenticate(user=user)
+
+    response = api_client.post(reverse("orders:checkout"), {})
+
+    assert response.status_code == 201
+    groups = {o["checkout_group"] for o in response.data["orders"]}
+    assert len(groups) == 1 and None not in groups
+    assert Order.objects.filter(user=user, checkout_group=groups.pop()).count() == 2
+
+
+def test_vendor_admin_cannot_mark_order_paid(
+    api_client, user_factory, vendor_factory, order_factory
+):
+    vendor = vendor_factory()
+    order = order_factory(vendor=vendor)
+    api_client.force_authenticate(user=user_factory(role="vendor_admin", vendor=vendor))
+    response = api_client.patch(
+        reverse("orders:order-status-update", args=[order.id]),
+        {"status": "paid"},
+        format="json",
+    )
+    assert response.status_code == 403
+    assert response.data["detail"] == (
+        "Payments are confirmed by GrottoMore in the payments queue."
+    )
+    order.refresh_from_db()
+    assert order.status == "pending"
+
+
+@pytest.mark.parametrize("role", ["admin", "manager"])
+def test_cannot_mark_paid_while_payment_under_review(
+    api_client, role, user_factory, order_factory, payment_submission_factory
+):
+    order = order_factory()
+    payment_submission_factory(user=order.user, status="submitted").orders.set(
+        [order]
+    )
+    api_client.force_authenticate(user=user_factory(role=role))
+    response = api_client.patch(
+        reverse("orders:order-status-update", args=[order.id]),
+        {"status": "paid"},
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.data["detail"] == (
+        "This order has a payment under review — confirm it in the payments queue."
+    )
+    order.refresh_from_db()
+    assert order.status == "pending"
+
+
+@pytest.mark.parametrize("role", ["admin", "manager"])
+def test_staff_can_mark_paid_without_open_submission(
+    api_client, role, user_factory, order_factory, payment_submission_factory
+):
+    order = order_factory()
+    payment_submission_factory(user=order.user, status="rejected").orders.set([order])
+    api_client.force_authenticate(user=user_factory(role=role))
+    response = api_client.patch(
+        reverse("orders:order-status-update", args=[order.id]),
+        {"status": "paid"},
+        format="json",
+    )
+    assert response.status_code == 200
+    order.refresh_from_db()
+    assert order.status == "paid"

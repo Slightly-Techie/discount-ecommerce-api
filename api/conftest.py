@@ -17,6 +17,9 @@ from api.orders.tests.factories import (
     OrderReviewFactory,
 )
 
+# Payments
+from api.payments.tests.factories import PaymentAccountFactory, PaymentSubmissionFactory
+
 # Products
 from api.products.tests.factories import (
     ProductFactory,
@@ -48,6 +51,8 @@ register(TagFactory)
 register(CartFactory)
 register(CartItemFactory)
 register(VendorFactory)
+register(PaymentAccountFactory)
+register(PaymentSubmissionFactory)
 # BaseModelFactory is abstract, not registered as a fixture
 
 

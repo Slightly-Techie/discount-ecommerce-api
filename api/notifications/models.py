@@ -10,6 +10,9 @@ class Notification(BaseModel):
         VENDOR_APPROVED = "vendor_approved", "Vendor approved"
         VENDOR_REJECTED = "vendor_rejected", "Vendor rejected"
         VENDOR_SUSPENDED = "vendor_suspended", "Vendor suspended"
+        PAYMENT_SUBMITTED = "payment_submitted", "Payment submitted"
+        PAYMENT_CONFIRMED = "payment_confirmed", "Payment confirmed"
+        PAYMENT_REJECTED = "payment_rejected", "Payment rejected"
 
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,

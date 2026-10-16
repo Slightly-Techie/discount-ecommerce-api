@@ -101,6 +101,9 @@ class Order(BaseModel):
     tax = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     shipping = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     coupon = models.ForeignKey(Coupon, on_delete=models.SET_NULL, null=True, blank=True)
+    # Shared by every order created by the same checkout (one per vendor);
+    # one payment submission covers the whole group.
+    checkout_group = models.UUIDField(null=True, blank=True, db_index=True)
 
     def __str__(self):
         return f"Order {self.id} for {self.user.email}"

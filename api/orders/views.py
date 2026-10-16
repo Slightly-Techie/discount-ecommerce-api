@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 from django.db import transaction
@@ -11,6 +12,7 @@ from rest_framework.views import APIView
 
 from api.cart.models import Cart, CartItem
 from api.common.permissions import IsAdminManagerOrApprovedVendorAdmin, IsAdminOrManager
+from api.payments.models import PaymentSubmission
 from api.products.models import Product, ProductReview
 from api.users.models import User
 from api.vendors.models import Vendor
@@ -31,7 +33,6 @@ from .models import (
 from .serializers import (
     AdminOrderSerializer,
     CheckoutRequestSerializer,
-    CheckoutResponseSerializer,
     CheckoutResponseMultiOrderSerializer,
     CountrySerializer,
     CouponAdminSerializer,
@@ -111,7 +112,7 @@ class CheckoutView(APIView):
                 for vendor_id, items in items_by_vendor.items():
                     vendor_subtotal = Decimal("0")
                     for item in items:
-                        vendor_subtotal += item.product.price * item.quantity
+                        vendor_subtotal += item.product.current_price() * item.quantity
                     subtotals_by_vendor[vendor_id] = vendor_subtotal
                     total_subtotal += vendor_subtotal
 
@@ -150,6 +151,7 @@ class CheckoutView(APIView):
                 else:
                     discounts_by_vendor = {vendor_id: Decimal("0") for vendor_id in subtotals_by_vendor.keys()}
 
+                checkout_group = uuid.uuid4()
                 created_orders = []
                 shipping_warning = None
 
@@ -176,9 +178,10 @@ class CheckoutView(APIView):
                         tax=tax,
                         shipping=shipping,
                         coupon=coupon,
+                        checkout_group=checkout_group,
                     )
                     for item in items:
-                        price = item.product.price
+                        price = item.product.current_price()
                         OrderItem.objects.create(
                             order=order,
                             product=item.product,
@@ -287,6 +290,22 @@ class OrderStatusUpdateView(APIView):
                 if order.vendor_id != getattr(request.user, "vendor_id", None):
                     return Response({"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
             new_status = request.data.get("status")
+            if new_status == Order.Status.PAID:
+                if getattr(request.user, "role", None) == "vendor_admin":
+                    return Response(
+                        {"detail": "Payments are confirmed by GrottoMore in the payments queue."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                if order.payment_submissions.filter(
+                    status=PaymentSubmission.Status.SUBMITTED
+                ).exists():
+                    return Response(
+                        {
+                            "detail": "This order has a payment under review — "
+                            "confirm it in the payments queue."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             tracking_number = request.data.get("tracking_number")
             admin_note = request.data.get("admin_note")
             if tracking_number is not None:
