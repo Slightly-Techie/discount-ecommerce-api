@@ -6,8 +6,15 @@ from api.orders.models import Order
 from .models import PaymentAccount, PaymentSubmission
 from .validators import validate_screenshot
 
-from .models import PaymentAccount, PaymentSubmission
-from .validators import validate_screenshot
+
+def _under_review(orders):
+    return PaymentSubmission.objects.filter(
+        orders__in=orders,
+        status__in=[
+            PaymentSubmission.Status.SUBMITTED,
+            PaymentSubmission.Status.CONFIRMED,
+        ],
+    ).exists()
 
 
 class PaymentAccountSerializer(serializers.ModelSerializer):
@@ -103,14 +110,7 @@ class PaymentSubmissionCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"detail": "There are no orders awaiting payment for this checkout."}
             )
-        under_review = PaymentSubmission.objects.filter(
-            orders__in=orders,
-            status__in=[
-                PaymentSubmission.Status.SUBMITTED,
-                PaymentSubmission.Status.CONFIRMED,
-            ],
-        ).exists()
-        if under_review:
+        if _under_review(orders):
             raise serializers.ValidationError(
                 {"detail": "Payment for this order is already under review."}
             )
@@ -119,6 +119,13 @@ class PaymentSubmissionCreateSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         orders = validated_data.pop("orders")
+        # Runs inside the view's transaction: lock the orders so two concurrent
+        # submissions for the same checkout can't both pass the review check.
+        list(Order.objects.select_for_update().filter(id__in=[o.id for o in orders]))
+        if _under_review(orders):
+            raise serializers.ValidationError(
+                {"detail": "Payment for this order is already under review."}
+            )
         validated_data.pop("checkout_group", None)
         validated_data.pop("order_ids", None)
         submission = PaymentSubmission.objects.create(

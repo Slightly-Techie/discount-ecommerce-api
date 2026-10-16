@@ -103,4 +103,9 @@ class PaymentScreenshotView(APIView):
             mimetypes.guess_type(submission.screenshot.name)[0]
             or "application/octet-stream"
         )
-        return FileResponse(submission.screenshot.open("rb"), content_type=content_type)
+        response = FileResponse(
+            submission.screenshot.open("rb"), content_type=content_type
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response

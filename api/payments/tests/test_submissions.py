@@ -2,14 +2,17 @@ import io
 import os
 import uuid
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from PIL import Image
+from rest_framework.exceptions import ValidationError
 
 from api.notifications.models import Notification
 from api.payments.models import PaymentSubmission
+from api.payments.serializers import PaymentSubmissionCreateSerializer
 
 pytestmark = pytest.mark.django_db
 
@@ -118,6 +121,25 @@ def test_duplicate_submission_blocked_while_under_review(
     assert "already under review" in str(second.data)
 
 
+def test_submission_made_after_validation_is_caught_at_save(
+    user, checkout_orders, payment_account_factory, payment_submission_factory
+):
+    # Simulates a concurrent POST landing between validate() and save().
+    serializer = PaymentSubmissionCreateSerializer(
+        data=payload(
+            payment_account_factory(),
+            checkout_group=str(checkout_orders[0].checkout_group),
+        ),
+        context={"request": SimpleNamespace(user=user)},
+    )
+    assert serializer.is_valid(), serializer.errors
+    payment_submission_factory(user=user).orders.set(checkout_orders)
+
+    with pytest.raises(ValidationError, match="already under review"):
+        serializer.save()
+    assert PaymentSubmission.objects.count() == 1
+
+
 def test_can_resubmit_after_rejection(
     api_client,
     user,
@@ -196,7 +218,10 @@ def test_screenshot_not_visible_to_other_users(
     )
     url = reverse("payments:submission-screenshot", args=[created.data["id"]])
 
-    assert api_client.get(url).status_code == 200
+    own = api_client.get(url)
+    assert own.status_code == 200
+    assert "no-store" in own["Cache-Control"]
+    assert own["X-Content-Type-Options"] == "nosniff"
     api_client.force_authenticate(user=user_factory())
     assert api_client.get(url).status_code == 404
     api_client.force_authenticate(user=user_factory(role="manager"))
