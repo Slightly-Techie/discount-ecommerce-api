@@ -82,7 +82,9 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_SSH_PORT != '' && secrets.EC2_SSH_PORT || '22' }}
-          script_stop: true
+          # No script_stop: it appends an exit-on-failure check after every line,
+          # including after `else`, where $? is the failed `if` test, so the
+          # script died silently. `set -eu` already stops on real errors.
           script: |
             set -eu
 
