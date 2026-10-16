@@ -171,7 +171,8 @@ jobs:
 
               compose run --rm web python manage.py migrate --noinput
               compose run --rm web python manage.py collectstatic --noinput
-              compose run --rm web python manage.py add_countries
+              # add_countries is not run here: it lives in api/common, which is not an
+              # installed app, so Django reports "Unknown command".
 
               touch "$BOOTSTRAP_MARKER"
             fi
