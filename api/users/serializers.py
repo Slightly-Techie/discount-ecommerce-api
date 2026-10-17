@@ -108,6 +108,9 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             "role",
             "metadata",
         ]
+        # Public signup always creates a customer: a writable role let anyone
+        # register as an admin. Staff roles are granted by an admin.
+        read_only_fields = ["id", "role"]
 
     def create(self, validated_data):
         password = validated_data.pop("password")
