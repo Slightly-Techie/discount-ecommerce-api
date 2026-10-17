@@ -184,6 +184,8 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_THROTTLE_RATES": {"vendor_request": "5/hour"},
+    # Cloudflare + nginx sit in front, so the real client is 2nd from the right in X-Forwarded-For.
+    "NUM_PROXIES": env.int("NUM_PROXIES", default=2),
 }
 
 # Email: read from the environment. The default prints to the console so local

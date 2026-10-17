@@ -71,6 +71,19 @@ def test_vendor_request_is_throttled(api_client):
     assert api_client.post(url, PAYLOAD).status_code == 429
 
 
+def test_vendor_request_throttle_ignores_spoofed_forwarded_for(api_client):
+    url = reverse("vendors:vendor-request-list")
+
+    statuses = [
+        api_client.post(
+            url, PAYLOAD, HTTP_X_FORWARDED_FOR=f"10.0.0.{i}, 203.0.113.7, 172.70.1.1"
+        ).status_code
+        for i in range(6)
+    ]
+
+    assert statuses == [201] * 5 + [429]
+
+
 def test_only_staff_list_requests(api_client, staff, user):
     url = reverse("vendors:vendor-request-list")
     make_request()
