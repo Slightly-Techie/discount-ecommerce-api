@@ -1,87 +1,199 @@
+import re
+import uuid
+
 import pytest
+from django.core import mail
 from django.urls import reverse
 
-from api.vendors.models import Vendor
+from api.products.models import Product
+from api.users.models import User
+from api.vendors.models import Vendor, VendorRequest
 
 pytestmark = pytest.mark.django_db
 
 
-class TestVendorAdminSignup:
-    """Test vendor admin signup endpoint."""
+CREATE_URL_NAME = "vendors:vendor-list"
 
-    def test_vendor_admin_signup_success(self, api_client):
-        """Test successful vendor admin signup."""
-        url = reverse("vendors:vendor-admin-signup")
-        data = {
-            "email": "vendoradmin@example.com",
-            "phonenumber": "+233200000001",
-            "password": "SecurePass123!",
-            "first_name": "John",
-            "last_name": "Doe",
-            "vendor_name": "My Store",
-        }
-        response = api_client.post(url, data)
+
+def _payload(**overrides):
+    data = {
+        "name": "Ama Stores",
+        "owner_email": "ama@example.com",
+        "owner_first_name": "Ama",
+        "owner_last_name": "Mensah",
+        "owner_phonenumber": "+233209999999",
+    }
+    data.update(overrides)
+    return data
+
+
+@pytest.fixture
+def staff_client(api_client, user_factory):
+    api_client.force_authenticate(user=user_factory(role="admin"))
+    return api_client
+
+
+class TestAdminCreatesVendor:
+    def test_staff_create_vendor_creates_login_and_sends_invite(self, staff_client):
+        response = staff_client.post(reverse(CREATE_URL_NAME), _payload(), format="json")
 
         assert response.status_code == 201
-        assert "user" in response.data
-        assert "vendor" in response.data
-        assert "access" in response.data
-        assert "refresh" in response.data
-        assert response.data["user"]["role"] == "vendor_admin"
-        assert response.data["vendor"]["status"] == "pending"
-        assert response.data["vendor"]["name"] == "My Store"
+        vendor = Vendor.objects.get(name="Ama Stores")
+        assert vendor.status == Vendor.Status.APPROVED
+        owner = User.objects.get(email="ama@example.com")
+        assert owner.role == "vendor_admin"
+        assert owner.vendor == vendor
+        assert owner.has_usable_password() is False
+        assert response.data["id"] == str(vendor.id)
+        assert response.data["invite_sent"] is True
+        assert len(mail.outbox) == 1
+        assert "/set-password?uid=" in mail.outbox[0].body
 
-    def test_vendor_admin_signup_duplicate_vendor_name(self, api_client, vendor):
-        """Test signup with duplicate vendor name fails."""
-        url = reverse("vendors:vendor-admin-signup")
-        data = {
-            "email": "vendoradmin@example.com",
-            "phonenumber": "+233200000001",
-            "password": "SecurePass123!",
-            "vendor_name": vendor.name,
-        }
-        response = api_client.post(url, data)
+    def test_production_admin_shape_can_create_vendor(self, api_client, user_factory):
+        api_client.force_authenticate(
+            user=user_factory(role="customer", is_staff=True, is_superuser=True)
+        )
 
+        response = api_client.post(reverse(CREATE_URL_NAME), _payload(), format="json")
+
+        assert response.status_code == 201
+
+    def test_create_vendor_converts_request(self, staff_client):
+        vendor_request = VendorRequest.objects.create(
+            business_name="Ama Stores", contact_name="Ama", email="ama@example.com",
+            phone="+233209999999", sells="bags",
+        )
+
+        response = staff_client.post(
+            reverse(CREATE_URL_NAME), _payload(request=str(vendor_request.id)), format="json"
+        )
+
+        assert response.status_code == 201
+        vendor_request.refresh_from_db()
+        assert vendor_request.status == VendorRequest.Status.CONVERTED
+        assert vendor_request.vendor_id == uuid.UUID(response.data["id"])
+
+    def test_create_vendor_rejects_unknown_or_handled_request(self, staff_client):
+        handled = VendorRequest.objects.create(
+            business_name="X", contact_name="X", email="x@example.com",
+            phone="+233200000009", sells="x", status=VendorRequest.Status.DISMISSED,
+        )
+        for request_id in (str(uuid.uuid4()), str(handled.id)):
+            response = staff_client.post(
+                reverse(CREATE_URL_NAME), _payload(request=request_id), format="json"
+            )
+            assert response.status_code == 400
+            assert "request" in response.data
+        assert not Vendor.objects.filter(name="Ama Stores").exists()
+
+    def test_create_vendor_rejects_existing_email_phone_and_name(
+        self, staff_client, user_factory, vendor_factory
+    ):
+        existing = user_factory(email="taken@example.com", phonenumber="+233201111111")
+        vendor_factory(name="Taken Name")
+        users_before = User.objects.count()
+        vendors_before = Vendor.objects.count()
+
+        cases = [
+            ({"owner_email": "TAKEN@example.com"}, "owner_email"),
+            ({"owner_phonenumber": existing.phonenumber}, "owner_phonenumber"),
+            ({"name": "taken name"}, "name"),
+        ]
+        for overrides, field in cases:
+            response = staff_client.post(
+                reverse(CREATE_URL_NAME), _payload(**overrides), format="json"
+            )
+            assert response.status_code == 400
+            assert field in response.data
+
+        assert User.objects.count() == users_before
+        assert Vendor.objects.count() == vendors_before
+        assert len(mail.outbox) == 0
+
+    def test_create_vendor_survives_email_failure(self, staff_client, monkeypatch):
+        def boom(*args, **kwargs):
+            raise OSError("smtp down")
+
+        monkeypatch.setattr("api.users.invites.send_mail", boom)
+
+        response = staff_client.post(reverse(CREATE_URL_NAME), _payload(), format="json")
+
+        assert response.status_code == 201
+        assert response.data["invite_sent"] is False
+        assert Vendor.objects.filter(name="Ama Stores").exists()
+        assert User.objects.filter(email="ama@example.com").exists()
+
+    def test_non_staff_cannot_create_vendor(self, api_client, user_factory, vendor):
+        url = reverse(CREATE_URL_NAME)
+        assert api_client.post(url, _payload(), format="json").status_code == 401
+
+        api_client.force_authenticate(user=user_factory(role="customer"))
+        assert api_client.post(url, _payload(), format="json").status_code == 403
+
+        api_client.force_authenticate(user=user_factory(role="vendor_admin", vendor=vendor))
+        assert api_client.post(url, _payload(), format="json").status_code == 403
+        assert not Vendor.objects.filter(name="Ama Stores").exists()
+
+
+class TestResendInvite:
+    def test_resend_invite(self, api_client, user_factory, vendor_factory):
+        vendor = vendor_factory()
+        user_factory(role="vendor_admin", vendor=vendor)
+        ownerless = vendor_factory()
+        url = reverse("vendors:vendor-resend-invite", args=[vendor.id])
+
+        api_client.force_authenticate(user=user_factory(role="admin"))
+        response = api_client.post(url)
+        assert response.status_code == 200
+        assert response.data == {"invite_sent": True}
+        assert len(mail.outbox) == 1
+
+        response = api_client.post(reverse("vendors:vendor-resend-invite", args=[ownerless.id]))
         assert response.status_code == 400
-        assert "vendor_name" in response.data
+        assert response.data["detail"] == "This vendor has no login to invite."
 
-    def test_vendor_admin_signup_duplicate_email(self, api_client, user):
-        """Test signup with duplicate email fails."""
-        url = reverse("vendors:vendor-admin-signup")
-        data = {
-            "email": user.email,
-            "phonenumber": "+233200000001",
-            "password": "SecurePass123!",
-            "vendor_name": "New Store",
-        }
-        response = api_client.post(url, data)
+        api_client.force_authenticate(user=user_factory(role="customer"))
+        assert api_client.post(url).status_code == 403
 
-        assert response.status_code == 400
-        assert "email" in response.data
+    def test_resend_invite_unknown_vendor(self, api_client, user_factory):
+        api_client.force_authenticate(user=user_factory(role="admin"))
+        url = reverse("vendors:vendor-resend-invite", args=[uuid.uuid4()])
+        assert api_client.post(url).status_code == 404
 
-    def test_vendor_admin_signup_missing_fields(self, api_client):
-        """Test signup with missing required fields fails."""
-        url = reverse("vendors:vendor-admin-signup")
-        data = {
-            "email": "vendoradmin@example.com",
-            # Missing password, phonenumber, vendor_name
-        }
-        response = api_client.post(url, data)
 
-        assert response.status_code == 400
+def test_vendor_self_signup_is_gone(api_client):
+    response = api_client.post("/api/vendors/signup/", {}, format="json")
+    assert response.status_code == 404
 
-    def test_vendor_admin_signup_weak_password(self, api_client):
-        """Test signup with weak password fails."""
-        url = reverse("vendors:vendor-admin-signup")
-        data = {
-            "email": "vendoradmin@example.com",
-            "phonenumber": "+233200000001",
-            "password": "123",  # Too weak
-            "vendor_name": "My Store",
-        }
-        response = api_client.post(url, data)
 
-        assert response.status_code == 400
+def test_invited_owner_can_set_password_and_create_product(staff_client, api_client):
+    response = staff_client.post(reverse(CREATE_URL_NAME), _payload(), format="json")
+    assert response.status_code == 201
+    link = re.search(r"/set-password\?uid=([^&\s]+)&token=([^\s]+)", mail.outbox[0].body)
+    uid, token = link.groups()
+
+    api_client.force_authenticate(user=None)
+    confirm = api_client.post(
+        reverse("password-reset-confirm"),
+        {"uid": uid, "token": token, "new_password": "SecurePass123!"},
+        format="json",
+    )
+    assert confirm.status_code == 200
+
+    login = api_client.post(
+        "/api/auth/token/",
+        {"email": "ama@example.com", "password": "SecurePass123!"},
+        format="json",
+    )
+    assert login.status_code == 200
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+    product = api_client.post(
+        reverse("products:product-list-create"),
+        {"name": "Bag", "price": "10.00"},
+        format="json",
+    )
+    assert product.status_code == 201
+    assert Product.objects.get(name="Bag").vendor_id == Vendor.objects.get(name="Ama Stores").id
 
 
 class TestVendorList:

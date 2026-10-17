@@ -1,7 +1,11 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import ValidationError
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
@@ -15,6 +19,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from api.common.permissions import IsPlatformAdmin
 from api.common.utils import BASE_OTP_SECRET, generate_otp, send_email, verify_otp
 
+from .invites import set_password_url
 from .models import Address, Profile, User
 from .serializers import (
     AddressSerializer,
@@ -162,15 +167,9 @@ class PasswordResetRequestView(APIView):
                 {"detail": "If the email exists, a reset link will be sent."},
                 status=status.HTTP_200_OK,
             )
-        token = default_token_generator.make_token(user)
-        uid = user.pk
-        # In production, use a proper frontend URL
-        reset_url = (
-            f"http://localhost:8000/reset-password-confirm/?uid={uid}&token={token}"
-        )
         send_email(
             "Password Reset",
-            f"Use this link to reset your password: {reset_url}",
+            f"Use this link to reset your password: {set_password_url(user)}",
             [email],
         )
         return Response(
@@ -194,18 +193,25 @@ class PasswordResetConfirmView(APIView):
         uid = serializer.validated_data["uid"]
         token = serializer.validated_data["token"]
         new_password = serializer.validated_data["new_password"]
+        invalid = Response(
+            {"detail": "Invalid or expired token."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
         try:
-            user = User.objects.get(pk=uid)
-        except User.DoesNotExist:
-            return Response(
-                {"detail": "Invalid user."}, status=status.HTTP_400_BAD_REQUEST
-            )
+            user = User.objects.get(pk=force_str(urlsafe_base64_decode(uid)))
+        except (User.DoesNotExist, ValueError, TypeError, OverflowError, ValidationError):
+            return invalid
         if not default_token_generator.check_token(user, token):
+            return invalid
+        try:
+            validate_password(new_password, user)
+        except ValidationError as e:
             return Response(
-                {"detail": "Invalid or expired token."},
+                {"new_password": list(e.messages)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         user.set_password(new_password)
+        user.is_email_verified = True
         user.save()
         return Response({"detail": "Password has been reset."})
 

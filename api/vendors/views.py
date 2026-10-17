@@ -1,62 +1,26 @@
-from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from api.common.permissions import IsAdminOrManager
 from api.notifications.services import (
-    notify_admins_vendor_signup,
+    notify_admins_vendor_request,
     notify_vendor_status_change,
 )
-from api.vendors.models import Vendor
+from api.users.invites import send_vendor_invite
+from api.vendors.models import Vendor, VendorRequest
 
 from .serializers import (
-    VendorAdminSignupResponseSerializer,
     VendorAdminSerializer,
-    VendorAdminSignupSerializer,
+    VendorCreateSerializer,
+    VendorRequestCreateSerializer,
+    VendorRequestSerializer,
     VendorSerializer,
     VendorUpdateSerializer,
 )
 
-
-class VendorAdminSignupView(generics.CreateAPIView):
-    """
-    Vendor admin signup.
-    Creates a new user (role=vendor_admin) and a new Vendor in PENDING status.
-    Vendor admins are blocked from vendor operations until approved by platform admins.
-    """
-
-    permission_classes = [permissions.AllowAny]
-    serializer_class = VendorAdminSignupSerializer
-
-    @swagger_auto_schema(
-        responses={201: VendorAdminSignupResponseSerializer},
-        operation_summary="Vendor admin signup",
-    )
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        payload = serializer.save()
-
-        user = payload["user"]
-        vendor = payload["vendor"]
-        notify_admins_vendor_signup(vendor, user)
-        response = {
-            "user": {
-                "id": str(user.id),
-                "email": user.email,
-                "phonenumber": user.phonenumber,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "role": user.role,
-                "vendor": str(vendor.id),
-            },
-            "vendor": VendorSerializer(vendor).data,
-            "refresh": payload["refresh"],
-            "access": payload["access"],
-        }
-        return Response(response, status=status.HTTP_201_CREATED)
 
 class VendorMeView(generics.RetrieveUpdateAPIView):
     serializer_class = VendorSerializer
@@ -101,24 +65,32 @@ class VendorDetailView(generics.RetrieveUpdateAPIView):
             return VendorUpdateSerializer
         return VendorAdminSerializer
 
-class VendorListView(generics.ListAPIView):
+class VendorListView(generics.ListCreateAPIView):
     """
-    List vendors.
+    GET: list vendors.
     - Platform admins/managers: see all
     - Others: see only approved vendors
+    POST: platform staff create a vendor and its owner login, then email an invite.
     """
 
     serializer_class = VendorSerializer
-    permission_classes = [permissions.AllowAny]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     filterset_fields = ["status"]
     search_fields = ["name", "slug"]
     ordering_fields = ["created_at", "updated_at", "name"]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [permissions.IsAuthenticated(), IsAdminOrManager()]
+        return [permissions.AllowAny()]
 
     def _is_platform_staff(self):
         user = self.request.user
         return user.is_authenticated and (user.is_staff or getattr(user, "role", None) in ["admin", "manager"])
 
     def get_serializer_class(self):
+        if self.request.method == "POST":
+            return VendorCreateSerializer
         if self._is_platform_staff():
             return VendorAdminSerializer
         return VendorSerializer
@@ -128,6 +100,28 @@ class VendorListView(generics.ListAPIView):
         if self._is_platform_staff():
             return qs.prefetch_related("admins")
         return qs.filter(status=Vendor.Status.APPROVED)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        vendor = serializer.save()
+        invite_sent = send_vendor_invite(serializer.owner, vendor)
+        data = VendorAdminSerializer(vendor, context=self.get_serializer_context()).data
+        return Response({**data, "invite_sent": invite_sent}, status=status.HTTP_201_CREATED)
+
+
+class VendorResendInviteView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def post(self, request, pk):
+        try:
+            vendor = Vendor.objects.get(pk=pk)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor not found."}, status=404)
+        owner = vendor.admins.first()
+        if owner is None:
+            return Response({"detail": "This vendor has no login to invite."}, status=400)
+        return Response({"invite_sent": send_vendor_invite(owner, vendor)})
 
 
 class VendorApproveView(APIView):
@@ -174,3 +168,55 @@ class VendorSuspendView(APIView):
         notify_vendor_status_change(vendor)
         return Response({"detail": "Vendor suspended."})
 
+
+
+class VendorRequestListCreateView(generics.ListCreateAPIView):
+    """
+    POST: public "Sell on GrottoMore" form (throttled per IP).
+    GET: platform staff review the requests, optionally filtered by ?status=.
+    """
+
+    queryset = VendorRequest.objects.all()
+    filterset_fields = ["status"]
+    throttle_scope = "vendor_request"
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsAdminOrManager()]
+
+    def get_throttles(self):
+        if self.request.method == "POST":
+            return [ScopedRateThrottle()]
+        return []
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return VendorRequestCreateSerializer
+        return VendorRequestSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        vendor_request = serializer.save()
+        notify_admins_vendor_request(vendor_request)
+        return Response(
+            {"detail": "Thanks, we'll be in touch."}, status=status.HTTP_201_CREATED
+        )
+
+
+class VendorRequestDismissView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def patch(self, request, pk):
+        try:
+            vendor_request = VendorRequest.objects.get(pk=pk)
+        except VendorRequest.DoesNotExist:
+            return Response({"detail": "Request not found."}, status=404)
+        if vendor_request.status != VendorRequest.Status.NEW:
+            return Response(
+                {"detail": "Only new requests can be dismissed."}, status=400
+            )
+        vendor_request.status = VendorRequest.Status.DISMISSED
+        vendor_request.save(update_fields=["status", "updated_at"])
+        return Response(VendorRequestSerializer(vendor_request).data)

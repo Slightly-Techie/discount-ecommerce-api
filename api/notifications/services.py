@@ -1,9 +1,13 @@
+import logging
+
 from django.db.models import Q
 from django.utils import timezone
 
 from api.common.utils import send_email
 
 from .models import Notification
+
+logger = logging.getLogger(__name__)
 
 
 def get_platform_admins():
@@ -16,31 +20,32 @@ def get_platform_admins():
     ).distinct()
 
 
-def notify_admins_vendor_signup(vendor, applicant):
-    """Notify every platform admin (in-app + email) that a vendor is awaiting approval."""
+def notify_admins_vendor_request(vendor_request):
+    """Tell every platform admin (in-app + email) that someone wants to sell."""
     admins = list(get_platform_admins())
     if not admins:
-        return []
-    name = f"{applicant.first_name} {applicant.last_name}".strip() or applicant.email
-    title = f"New vendor awaiting approval: {vendor.name}"
+        return
+    title = f"New seller request: {vendor_request.business_name}"
     message = (
-        f"{name} ({applicant.email}) registered the vendor \"{vendor.name}\" "
-        "and is awaiting approval."
+        f"{vendor_request.contact_name} ({vendor_request.email}, "
+        f"{vendor_request.phone}) wants to sell on GrottoMore as "
+        f"\"{vendor_request.business_name}\". They sell: {vendor_request.sells}"
     )
-    notifications = Notification.objects.bulk_create(
+    Notification.objects.bulk_create(
         [
             Notification(
                 recipient=admin,
-                type=Notification.Type.VENDOR_SIGNUP,
+                type=Notification.Type.VENDOR_REQUEST,
                 title=title,
                 message=message,
-                vendor=vendor,
             )
             for admin in admins
         ]
     )
-    send_email(title, message, [a.email for a in admins])
-    return notifications
+    try:
+        send_email(title, message, [a.email for a in admins])
+    except Exception:
+        logger.exception("Could not email admins about vendor request %s", vendor_request.pk)
 
 
 STATUS_MESSAGES = {

@@ -34,3 +34,33 @@ class Vendor(BaseModel):
         return self.name
 
 
+class VendorRequest(BaseModel):
+    """A public "Sell on GrottoMore" enquiry, reviewed by platform staff."""
+
+    class Status(models.TextChoices):
+        NEW = "new", "New"
+        CONVERTED = "converted", "Converted"
+        DISMISSED = "dismissed", "Dismissed"
+
+    business_name = models.CharField(max_length=255)
+    contact_name = models.CharField(max_length=255)
+    email = models.EmailField()
+    phone = models.CharField(max_length=32)
+    sells = models.TextField()
+    message = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.NEW
+    )
+    vendor = models.ForeignKey(
+        Vendor,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="requests",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.business_name} ({self.status})"

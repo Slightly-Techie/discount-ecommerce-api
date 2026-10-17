@@ -1,6 +1,7 @@
 import csv
 from io import StringIO
 
+from django.db.models import Q
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
 from rest_framework.fields import BooleanField
@@ -8,7 +9,11 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.common.permissions import IsAdminManagerOrApprovedVendorAdmin, IsAdminOrManager
+from api.common.permissions import (
+    IsAdminManagerOrApprovedVendorAdmin,
+    IsAdminOrManager,
+    is_platform_staff,
+)
 
 from .models import Product, ProductImage, ProductReview, ProductVariant
 from .serializers import (
@@ -19,8 +24,42 @@ from .serializers import (
     ProductReviewSerializer,
     ProductVariantSerializer,
 )
+from .visibility import shopper_visible_q
 
 # Create your views here.
+
+
+def _scope_products(qs, request):
+    """Staff see all; vendor admins read shop + own but write own only; others see the shop."""
+    user = request.user
+    if is_platform_staff(user):
+        return qs.all()
+    if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
+        # vendor=None would match vendor-less platform products (IS NULL), so guard it.
+        if user.vendor_id is None:
+            if request.method in permissions.SAFE_METHODS:
+                return qs.filter(shopper_visible_q())
+            return qs.none()
+        if request.method in permissions.SAFE_METHODS:
+            return qs.filter(shopper_visible_q() | Q(vendor=user.vendor))
+        return qs.filter(vendor=user.vendor)
+    return qs.filter(shopper_visible_q())
+
+
+def _own_children_only(qs, request):
+    """Writes to images/variants: staff anywhere, vendor admins on their own products only."""
+    if request.method in permissions.SAFE_METHODS or is_platform_staff(request.user):
+        return qs
+    return qs.filter(product__vendor_id=request.user.vendor_id)
+
+
+class ProductChildWritePermissionMixin:
+    """Reads are public; writes need staff or an approved vendor admin."""
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsAdminManagerOrApprovedVendorAdmin()]
 
 
 class ProductListCreateView(generics.ListCreateAPIView):
@@ -32,25 +71,16 @@ class ProductListCreateView(generics.ListCreateAPIView):
     """
 
     permission_classes = [permissions.AllowAny]
-    filterset_fields = ["source", "source_platform", "category", "tags"]
+    filterset_fields = ["source", "source_platform", "category", "tags", "vendor"]
     search_fields = ["name", "description", "source_platform"]
     ordering_fields = ["price", "discount_price", "created_at", "updated_at"]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        qs = Product.objects.select_related("category").prefetch_related(
+        qs = Product.objects.select_related("category", "vendor").prefetch_related(
             "tags", "related_products"
         )
-        user = self.request.user
-        if user.is_authenticated and (
-            user.is_staff
-            or getattr(user, "role", None) in ["admin", "manager"]
-        ):
-            return qs.all().order_by("-created_at")
-        if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
-            # Vendor admins can see only their own vendor's products (including drafts)
-            return qs.filter(vendor=user.vendor).order_by("-created_at")
-        return qs.filter(is_deleted=False).order_by("-created_at")
+        return _scope_products(qs, self.request).order_by("-created_at")
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -74,7 +104,7 @@ class ProductListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         user = self.request.user
         if getattr(user, "role", None) == "vendor_admin":
-            serializer.save(source="internal", vendor=user.vendor)
+            serializer.save(source="internal", vendor=user.vendor, is_featured=False)
         else:
             serializer.save(source="internal")
 
@@ -92,17 +122,10 @@ class ProductRetrieveView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ProductReadSerializer
 
     def get_queryset(self):
-        qs = Product.objects.select_related("category").prefetch_related(
+        qs = Product.objects.select_related("category", "vendor").prefetch_related(
             "tags", "related_products"
         )
-        user = self.request.user
-        if user.is_authenticated and (
-            user.is_staff or getattr(user, "role", None) in ["admin", "manager"]
-        ):
-            return qs.all()
-        if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
-            return qs.filter(vendor=user.vendor)
-        return qs.filter(is_deleted=False)
+        return _scope_products(qs, self.request)
 
     def get_serializer_class(self):
         if self.request.method in ["PUT", "PATCH"]:
@@ -250,14 +273,14 @@ class ProductBulkUploadView(APIView):
         # JSON bulk upload
         if isinstance(request.data, list):
             for idx, item in enumerate(request.data):
-                serializer = ProductCreateSerializer(data=item)
+                serializer = ProductCreateSerializer(data=item, context={"request": request})
                 if serializer.is_valid():
                     created.append(serializer.save())
                 else:
                     errors.append({"index": idx, "errors": serializer.errors})
         elif isinstance(request.data, dict) and "products" in request.data:
             for idx, item in enumerate(request.data["products"]):
-                serializer = ProductCreateSerializer(data=item)
+                serializer = ProductCreateSerializer(data=item, context={"request": request})
                 if serializer.is_valid():
                     created.append(serializer.save())
                 else:
@@ -268,7 +291,7 @@ class ProductBulkUploadView(APIView):
             decoded_file = file.read().decode("utf-8")
             reader = csv.DictReader(StringIO(decoded_file))
             for idx, row in enumerate(reader):
-                serializer = ProductCreateSerializer(data=row)
+                serializer = ProductCreateSerializer(data=row, context={"request": request})
                 if serializer.is_valid():
                     created.append(serializer.save())
                 else:
@@ -287,14 +310,15 @@ class ProductBulkUploadView(APIView):
         )
 
 
-class ProductImageListCreateTopView(generics.ListCreateAPIView):
+class ProductImageListCreateTopView(
+    ProductChildWritePermissionMixin, generics.ListCreateAPIView
+):
     """
     List all product images or upload a new image (admin/manager only).
     Supports filtering, search, and ordering.
     """
 
     serializer_class = ProductImageSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     filterset_fields = ["product"]
     search_fields = ["product__name"]
     ordering_fields = ["created_at", "updated_at"]
@@ -309,29 +333,29 @@ class ProductImageListCreateTopView(generics.ListCreateAPIView):
         return qs.filter(product__is_deleted=False)
 
 
-class ProductImageRetrieveUpdateDestroyTopView(generics.RetrieveUpdateDestroyAPIView):
+class ProductImageRetrieveUpdateDestroyTopView(
+    ProductChildWritePermissionMixin, generics.RetrieveUpdateDestroyAPIView
+):
     """
-    Retrieve, update, or delete a product image (admin/manager only).
+    Retrieve a product image; staff and the owning vendor admin may change or delete it.
     """
 
-    queryset = ProductImage.objects.all()
     serializer_class = ProductImageSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def get_permissions(self):
-        if self.request.method in ["PUT", "PATCH", "DELETE"]:
-            return [IsAdminOrManager()]
-        return [permissions.AllowAny()]
+    def get_queryset(self):
+        return _own_children_only(ProductImage.objects.all(), self.request)
 
 
-class ProductVariantListCreateTopView(generics.ListCreateAPIView):
+class ProductVariantListCreateTopView(
+    ProductChildWritePermissionMixin, generics.ListCreateAPIView
+):
     """
     List all product variants or create a new variant (admin/manager only).
     Supports filtering, search, and ordering.
     """
 
     serializer_class = ProductVariantSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     filterset_fields = ["product", "name"]
     search_fields = ["name", "product__name"]
     ordering_fields = ["created_at", "updated_at"]
@@ -346,18 +370,17 @@ class ProductVariantListCreateTopView(generics.ListCreateAPIView):
         return qs.filter(product__is_deleted=False)
 
 
-class ProductVariantRetrieveUpdateDestroyTopView(generics.RetrieveUpdateDestroyAPIView):
+class ProductVariantRetrieveUpdateDestroyTopView(
+    ProductChildWritePermissionMixin, generics.RetrieveUpdateDestroyAPIView
+):
     """
-    Retrieve, update, or delete a product variant (admin/manager only).
+    Retrieve a product variant; staff and the owning vendor admin may change or delete it.
     """
 
-    queryset = ProductVariant.objects.all()
     serializer_class = ProductVariantSerializer
 
-    def get_permissions(self):
-        if self.request.method in ["PUT", "PATCH", "DELETE"]:
-            return [IsAdminOrManager()]
-        return [permissions.AllowAny()]
+    def get_queryset(self):
+        return _own_children_only(ProductVariant.objects.all(), self.request)
 
 
 class ProductReviewListCreateTopView(generics.ListCreateAPIView):

@@ -7,6 +7,7 @@ from api.common.models import BaseModel
 class Notification(BaseModel):
     class Type(models.TextChoices):
         VENDOR_SIGNUP = "vendor_signup", "Vendor signup"
+        VENDOR_REQUEST = "vendor_request", "Vendor request"
         VENDOR_APPROVED = "vendor_approved", "Vendor approved"
         VENDOR_REJECTED = "vendor_rejected", "Vendor rejected"
         VENDOR_SUSPENDED = "vendor_suspended", "Vendor suspended"
