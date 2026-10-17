@@ -24,6 +24,9 @@ from api.orders.models import (
 class CountryFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Country
+        # code is unique and drawn from a short list: reuse an existing row
+        # instead of colliding (made test_checkout_multiple_shipping_methods flaky).
+        django_get_or_create = ("code",)
 
     code = factory.fuzzy.FuzzyChoice(["US", "CA", "GB", "NG", "ZA", "KE", "GH"])
     name = factory.LazyAttribute(lambda o: o.code)
