@@ -1,9 +1,13 @@
+import logging
+
 from django.db.models import Q
 from django.utils import timezone
 
 from api.common.utils import send_email
 
 from .models import Notification
+
+logger = logging.getLogger(__name__)
 
 
 def get_platform_admins():
@@ -38,7 +42,10 @@ def notify_admins_vendor_request(vendor_request):
             for admin in admins
         ]
     )
-    send_email(title, message, [a.email for a in admins])
+    try:
+        send_email(title, message, [a.email for a in admins])
+    except Exception:
+        logger.exception("Could not email admins about vendor request %s", vendor_request.pk)
 
 
 STATUS_MESSAGES = {

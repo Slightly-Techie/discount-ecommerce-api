@@ -155,3 +155,215 @@ def test_vendorless_vendor_admin_does_not_see_hidden_platform_products(
     assert str(visible.id) in ids
     assert str(hidden.id) not in ids
     assert api_client.get(_detail(hidden)).status_code == 404
+
+
+@pytest.mark.django_db
+def test_vendor_cannot_link_another_vendors_product_as_related(
+    api_client, user_factory, vendor_factory, product_factory
+):
+    vendor_a = vendor_factory()
+    vendor_b = vendor_factory()
+    mine = product_factory(vendor=vendor_a)
+    theirs = product_factory(vendor=vendor_b)
+    own_other = product_factory(vendor=vendor_a)
+    api_client.force_authenticate(user_factory(role="vendor_admin", vendor=vendor_a))
+
+    response = api_client.patch(
+        _detail(mine),
+        {"related_products": [str(theirs.id), str(own_other.id)]},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert set(mine.related_products.all()) == {own_other}
+    assert theirs.related_products.count() == 0
+
+
+@pytest.mark.django_db
+def test_staff_can_link_any_related_products(
+    api_client, user_factory, vendor_factory, product_factory
+):
+    first = product_factory(vendor=vendor_factory())
+    second = product_factory(vendor=vendor_factory())
+    api_client.force_authenticate(user_factory(is_staff=True))
+
+    response = api_client.patch(
+        _detail(first), {"related_products": [str(second.id)]}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert set(first.related_products.all()) == {second}
+
+
+@pytest.mark.django_db
+def test_public_detail_hides_draft_related_products(
+    api_client, product_factory
+):
+    product = product_factory(status="active")
+    live = product_factory(status="active")
+    draft = product_factory(status="draft")
+    product.related_products.add(live, draft)
+
+    related = api_client.get(_detail(product)).data["related_products"]
+
+    assert {row["id"] for row in related} == {str(live.id)}
+
+
+@pytest.mark.django_db
+def test_vendor_sees_own_draft_in_related_products(
+    api_client, user_factory, vendor_factory, product_factory
+):
+    vendor = vendor_factory()
+    product = product_factory(vendor=vendor)
+    own_draft = product_factory(status="draft", vendor=vendor)
+    product.related_products.add(own_draft)
+    api_client.force_authenticate(user_factory(role="vendor_admin", vendor=vendor))
+
+    related = api_client.get(_detail(product)).data["related_products"]
+
+    assert {row["id"] for row in related} == {str(own_draft.id)}
+
+
+@pytest.fixture
+def variant_url():
+    return reverse("products:product-variant-list-create")
+
+
+@pytest.fixture
+def image_url():
+    return reverse("products:product-image-list-create")
+
+
+def _tiny_image():
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    gif = (
+        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00"
+        b"\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+    )
+    return SimpleUploadedFile("t.gif", gif, content_type="image/gif")
+
+
+@pytest.mark.django_db
+def test_customer_cannot_create_variant(api_client, user_factory, product_factory, variant_url):
+    product = product_factory()
+    api_client.force_authenticate(user_factory(role="customer"))
+
+    response = api_client.post(
+        variant_url, {"product": str(product.id), "name": "Color", "value": "Red"}
+    )
+
+    assert response.status_code == 403
+    assert product.variants.count() == 0
+
+
+@pytest.mark.django_db
+def test_vendor_variant_create_is_own_products_only(
+    api_client, user_factory, vendor_factory, product_factory, variant_url
+):
+    vendor_a = vendor_factory()
+    vendor_b = vendor_factory()
+    mine = product_factory(vendor=vendor_a)
+    theirs = product_factory(vendor=vendor_b)
+    api_client.force_authenticate(user_factory(role="vendor_admin", vendor=vendor_a))
+
+    rejected = api_client.post(
+        variant_url, {"product": str(theirs.id), "name": "Color", "value": "Red"}
+    )
+    created = api_client.post(
+        variant_url, {"product": str(mine.id), "name": "Color", "value": "Red"}
+    )
+
+    assert rejected.status_code in (400, 403)
+    assert theirs.variants.count() == 0
+    assert created.status_code == 201
+
+
+@pytest.mark.django_db
+def test_staff_can_create_variant(api_client, user_factory, product_factory, variant_url):
+    product = product_factory()
+    api_client.force_authenticate(user_factory(is_staff=True, role="customer"))
+
+    response = api_client.post(
+        variant_url, {"product": str(product.id), "name": "Color", "value": "Red"}
+    )
+
+    assert response.status_code == 201
+
+
+@pytest.mark.django_db
+def test_vendor_cannot_change_or_delete_another_vendors_variant(
+    api_client, user_factory, vendor_factory, product_factory, variant_url
+):
+    from api.products.models import ProductVariant
+
+    vendor_a = vendor_factory()
+    theirs = product_factory(vendor=vendor_factory())
+    variant = ProductVariant.objects.create(product=theirs, name="Size", value="L")
+    detail = reverse("products:product-variant-detail", args=[variant.id])
+    api_client.force_authenticate(user_factory(role="vendor_admin", vendor=vendor_a))
+
+    assert api_client.patch(detail, {"value": "XL"}, format="json").status_code in (403, 404)
+    assert api_client.delete(detail).status_code in (403, 404)
+    variant.refresh_from_db()
+    assert variant.value == "L"
+
+
+@pytest.mark.django_db
+def test_vendor_can_edit_own_variant(
+    api_client, user_factory, vendor_factory, product_factory
+):
+    from api.products.models import ProductVariant
+
+    vendor = vendor_factory()
+    variant = ProductVariant.objects.create(
+        product=product_factory(vendor=vendor), name="Size", value="L"
+    )
+    detail = reverse("products:product-variant-detail", args=[variant.id])
+    api_client.force_authenticate(user_factory(role="vendor_admin", vendor=vendor))
+
+    assert api_client.patch(detail, {"value": "XL"}, format="json").status_code == 200
+
+
+@pytest.mark.django_db
+def test_customer_cannot_create_image(api_client, user_factory, product_factory, image_url):
+    product = product_factory()
+    api_client.force_authenticate(user_factory(role="customer"))
+
+    response = api_client.post(image_url, {"product": str(product.id), "image": _tiny_image()})
+
+    assert response.status_code == 403
+    assert product.images.count() == 0
+
+
+@pytest.mark.django_db
+def test_vendor_image_create_is_own_products_only(
+    api_client, user_factory, vendor_factory, product_factory, image_url
+):
+    vendor_a = vendor_factory()
+    mine = product_factory(vendor=vendor_a)
+    theirs = product_factory(vendor=vendor_factory())
+    api_client.force_authenticate(user_factory(role="vendor_admin", vendor=vendor_a))
+
+    rejected = api_client.post(image_url, {"product": str(theirs.id), "image": _tiny_image()})
+    created = api_client.post(image_url, {"product": str(mine.id), "image": _tiny_image()})
+
+    assert rejected.status_code in (400, 403)
+    assert theirs.images.count() == 0
+    assert created.status_code == 201
+
+
+@pytest.mark.django_db
+def test_vendor_cannot_change_or_delete_another_vendors_image(
+    api_client, user_factory, vendor_factory, product_factory
+):
+    from api.products.models import ProductImage
+
+    theirs = product_factory(vendor=vendor_factory())
+    image = ProductImage.objects.create(product=theirs, alt_text="x", image="products/x.gif")
+    detail = reverse("products:product-image-detail", args=[image.id])
+    api_client.force_authenticate(user_factory(role="vendor_admin", vendor=vendor_factory()))
+
+    assert api_client.patch(detail, {"alt_text": "y"}, format="json").status_code in (403, 404)
+    assert api_client.delete(detail).status_code in (403, 404)
+    assert ProductImage.objects.filter(pk=image.pk, alt_text="x").exists()

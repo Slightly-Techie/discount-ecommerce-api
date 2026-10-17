@@ -41,8 +41,8 @@ def test_fetch_discounted_products(api_client):
     assert response.status_code in (200, 403, 405)
 
 
-def test_product_image_create(api_client, user):
-    api_client.force_authenticate(user=user)
+def test_product_image_create(api_client):
+    api_client.force_authenticate(user=UserFactory(is_staff=True))
     product = ProductFactory()
     url = reverse("products:product-image-list-create")
     data = {"product": str(product.id)}
@@ -50,8 +50,8 @@ def test_product_image_create(api_client, user):
     assert response.status_code in (201, 400, 403)
 
 
-def test_product_variant_create(api_client, user):
-    api_client.force_authenticate(user=user)
+def test_product_variant_create(api_client):
+    api_client.force_authenticate(user=UserFactory(is_staff=True))
     product = ProductFactory()
     url = reverse("products:product-variant-list-create")
     data = {"product": str(product.id), "name": "Color", "value": "Red"}

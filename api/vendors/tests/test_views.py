@@ -49,6 +49,15 @@ class TestAdminCreatesVendor:
         assert len(mail.outbox) == 1
         assert "/set-password?uid=" in mail.outbox[0].body
 
+    def test_production_admin_shape_can_create_vendor(self, api_client, user_factory):
+        api_client.force_authenticate(
+            user=user_factory(role="customer", is_staff=True, is_superuser=True)
+        )
+
+        response = api_client.post(reverse(CREATE_URL_NAME), _payload(), format="json")
+
+        assert response.status_code == 201
+
     def test_create_vendor_converts_request(self, staff_client):
         vendor_request = VendorRequest.objects.create(
             business_name="Ama Stores", contact_name="Ama", email="ama@example.com",

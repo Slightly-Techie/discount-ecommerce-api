@@ -115,3 +115,40 @@ def test_staff_dismiss_request(api_client, staff):
     assert response.data["status"] == "dismissed"
     vendor_request.refresh_from_db()
     assert vendor_request.status == "dismissed"
+
+
+def test_dismiss_refuses_non_new_request(api_client, staff):
+    vendor_request = make_request(status="converted")
+    api_client.force_authenticate(user=staff)
+
+    response = api_client.patch(
+        reverse("vendors:vendor-request-dismiss", args=[vendor_request.pk])
+    )
+
+    assert response.status_code == 400
+    assert response.data == {"detail": "Only new requests can be dismissed."}
+    vendor_request.refresh_from_db()
+    assert vendor_request.status == "converted"
+
+
+def test_newline_in_business_name_does_not_break_the_form(api_client, staff, settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    data = {**PAYLOAD, "business_name": "Evil\nBcc: x@evil.com", "contact_name": "A\r\nB"}
+
+    response = api_client.post(reverse("vendors:vendor-request-list"), data)
+
+    assert response.status_code == 201
+    saved = VendorRequest.objects.get()
+    assert "\n" not in saved.business_name and "\r" not in saved.contact_name
+    assert "\n" not in mail.outbox[0].subject
+
+
+def test_notify_never_raises_when_email_fails(api_client, staff, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("smtp down")
+
+    monkeypatch.setattr("api.notifications.services.send_email", boom)
+
+    response = api_client.post(reverse("vendors:vendor-request-list"), PAYLOAD)
+
+    assert response.status_code == 201

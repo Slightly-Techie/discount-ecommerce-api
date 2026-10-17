@@ -46,6 +46,22 @@ def _scope_products(qs, request):
     return qs.filter(shopper_visible_q())
 
 
+def _own_children_only(qs, request):
+    """Writes to images/variants: staff anywhere, vendor admins on their own products only."""
+    if request.method in permissions.SAFE_METHODS or is_platform_staff(request.user):
+        return qs
+    return qs.filter(product__vendor_id=request.user.vendor_id)
+
+
+class ProductChildWritePermissionMixin:
+    """Reads are public; writes need staff or an approved vendor admin."""
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsAdminManagerOrApprovedVendorAdmin()]
+
+
 class ProductListCreateView(generics.ListCreateAPIView):
     """
     List all products or create a new internal product.
@@ -61,7 +77,7 @@ class ProductListCreateView(generics.ListCreateAPIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        qs = Product.objects.select_related("category").prefetch_related(
+        qs = Product.objects.select_related("category", "vendor").prefetch_related(
             "tags", "related_products"
         )
         return _scope_products(qs, self.request).order_by("-created_at")
@@ -106,7 +122,7 @@ class ProductRetrieveView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ProductReadSerializer
 
     def get_queryset(self):
-        qs = Product.objects.select_related("category").prefetch_related(
+        qs = Product.objects.select_related("category", "vendor").prefetch_related(
             "tags", "related_products"
         )
         return _scope_products(qs, self.request)
@@ -294,14 +310,15 @@ class ProductBulkUploadView(APIView):
         )
 
 
-class ProductImageListCreateTopView(generics.ListCreateAPIView):
+class ProductImageListCreateTopView(
+    ProductChildWritePermissionMixin, generics.ListCreateAPIView
+):
     """
     List all product images or upload a new image (admin/manager only).
     Supports filtering, search, and ordering.
     """
 
     serializer_class = ProductImageSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     filterset_fields = ["product"]
     search_fields = ["product__name"]
     ordering_fields = ["created_at", "updated_at"]
@@ -316,29 +333,29 @@ class ProductImageListCreateTopView(generics.ListCreateAPIView):
         return qs.filter(product__is_deleted=False)
 
 
-class ProductImageRetrieveUpdateDestroyTopView(generics.RetrieveUpdateDestroyAPIView):
+class ProductImageRetrieveUpdateDestroyTopView(
+    ProductChildWritePermissionMixin, generics.RetrieveUpdateDestroyAPIView
+):
     """
-    Retrieve, update, or delete a product image (admin/manager only).
+    Retrieve a product image; staff and the owning vendor admin may change or delete it.
     """
 
-    queryset = ProductImage.objects.all()
     serializer_class = ProductImageSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def get_permissions(self):
-        if self.request.method in ["PUT", "PATCH", "DELETE"]:
-            return [IsAdminOrManager()]
-        return [permissions.AllowAny()]
+    def get_queryset(self):
+        return _own_children_only(ProductImage.objects.all(), self.request)
 
 
-class ProductVariantListCreateTopView(generics.ListCreateAPIView):
+class ProductVariantListCreateTopView(
+    ProductChildWritePermissionMixin, generics.ListCreateAPIView
+):
     """
     List all product variants or create a new variant (admin/manager only).
     Supports filtering, search, and ordering.
     """
 
     serializer_class = ProductVariantSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     filterset_fields = ["product", "name"]
     search_fields = ["name", "product__name"]
     ordering_fields = ["created_at", "updated_at"]
@@ -353,18 +370,17 @@ class ProductVariantListCreateTopView(generics.ListCreateAPIView):
         return qs.filter(product__is_deleted=False)
 
 
-class ProductVariantRetrieveUpdateDestroyTopView(generics.RetrieveUpdateDestroyAPIView):
+class ProductVariantRetrieveUpdateDestroyTopView(
+    ProductChildWritePermissionMixin, generics.RetrieveUpdateDestroyAPIView
+):
     """
-    Retrieve, update, or delete a product variant (admin/manager only).
+    Retrieve a product variant; staff and the owning vendor admin may change or delete it.
     """
 
-    queryset = ProductVariant.objects.all()
     serializer_class = ProductVariantSerializer
 
-    def get_permissions(self):
-        if self.request.method in ["PUT", "PATCH", "DELETE"]:
-            return [IsAdminOrManager()]
-        return [permissions.AllowAny()]
+    def get_queryset(self):
+        return _own_children_only(ProductVariant.objects.all(), self.request)
 
 
 class ProductReviewListCreateTopView(generics.ListCreateAPIView):

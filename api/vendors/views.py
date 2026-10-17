@@ -213,6 +213,10 @@ class VendorRequestDismissView(APIView):
             vendor_request = VendorRequest.objects.get(pk=pk)
         except VendorRequest.DoesNotExist:
             return Response({"detail": "Request not found."}, status=404)
+        if vendor_request.status != VendorRequest.Status.NEW:
+            return Response(
+                {"detail": "Only new requests can be dismissed."}, status=400
+            )
         vendor_request.status = VendorRequest.Status.DISMISSED
         vendor_request.save(update_fields=["status", "updated_at"])
         return Response(VendorRequestSerializer(vendor_request).data)

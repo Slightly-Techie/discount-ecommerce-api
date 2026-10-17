@@ -148,6 +148,15 @@ class VendorRequestCreateSerializer(serializers.ModelSerializer):
         model = VendorRequest
         fields = ["business_name", "contact_name", "email", "phone", "sells", "message"]
 
+    def _single_line(self, value):
+        return " ".join(value.replace("\r", " ").replace("\n", " ").split())
+
+    def validate_business_name(self, value):
+        return self._single_line(value)
+
+    def validate_contact_name(self, value):
+        return self._single_line(value)
+
 
 class VendorRequestSerializer(serializers.ModelSerializer):
     class Meta:
