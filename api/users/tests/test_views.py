@@ -24,6 +24,20 @@ def test_user_registration(api_client):
     assert User.objects.filter(email="newuser@example.com").exists()
 
 
+@pytest.mark.parametrize("role", ["admin", "manager", "vendor_admin", "seller"])
+def test_user_registration_ignores_requested_role(api_client, role):
+    url = reverse("user-register")
+    data = {
+        "email": "climber@example.com",
+        "phonenumber": "+233200000998",
+        "password": "testpass123",
+        "role": role,
+    }
+    response = api_client.post(url, data)
+    assert response.status_code == 201
+    assert User.objects.get(email="climber@example.com").role == User.Role.CUSTOMER
+
+
 def test_user_login(api_client, user):
     url = reverse("user-login")
     data = {"email": user.email, "password": "password"}
