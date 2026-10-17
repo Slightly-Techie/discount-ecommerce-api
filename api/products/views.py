@@ -35,6 +35,11 @@ def _scope_products(qs, request):
     if is_platform_staff(user):
         return qs.all()
     if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
+        # vendor=None would match vendor-less platform products (IS NULL), so guard it.
+        if user.vendor_id is None:
+            if request.method in permissions.SAFE_METHODS:
+                return qs.filter(shopper_visible_q())
+            return qs.none()
         if request.method in permissions.SAFE_METHODS:
             return qs.filter(shopper_visible_q() | Q(vendor=user.vendor))
         return qs.filter(vendor=user.vendor)

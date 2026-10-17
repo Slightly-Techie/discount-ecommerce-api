@@ -141,3 +141,17 @@ def test_staff_sees_everything(
 
     ids = _ids(api_client.get(list_url))
     assert {str(draft.id), str(suspended.id)} <= ids
+
+
+@pytest.mark.django_db
+def test_vendorless_vendor_admin_does_not_see_hidden_platform_products(
+    api_client, user_factory, product_factory, list_url
+):
+    hidden = product_factory(status="draft", vendor=None)
+    visible = product_factory(status="active", vendor=None)
+    api_client.force_authenticate(user_factory(role="vendor_admin"))
+
+    ids = _ids(api_client.get(list_url))
+    assert str(visible.id) in ids
+    assert str(hidden.id) not in ids
+    assert api_client.get(_detail(hidden)).status_code == 404
