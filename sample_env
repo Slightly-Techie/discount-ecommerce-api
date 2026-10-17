@@ -16,6 +16,9 @@ EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
 # EMAIL_USE_TLS=True
 # DEFAULT_FROM_EMAIL=GrottoMore <noreply@grottomore.com>
 
+# Storefront base URL used in set-password emails
+# FRONTEND_URL=https://grottomore.com
+
 # OTP/2FA settings
 BASE_OTP_SECRET=your-very-secure-base32-secret
 

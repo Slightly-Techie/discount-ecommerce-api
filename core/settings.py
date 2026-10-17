@@ -197,6 +197,9 @@ EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=10)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="webmaster@localhost")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
+# Base URL of the storefront; set-password links point here.
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
+
 # CORS settings
 # CORS_URLS_REGEX = r"^/api/.*$"
 CORS_ALLOW_ALL_ORIGINS = True
