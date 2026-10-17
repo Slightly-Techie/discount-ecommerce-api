@@ -1,6 +1,19 @@
 from rest_framework import permissions
 
 
+def is_platform_staff(user):
+    """True for admin/manager role, Django staff or superuser (matches IsAdminOrManager)."""
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            getattr(user, "role", None) in ["admin", "manager"]
+            or user.is_staff
+            or user.is_superuser
+        )
+    )
+
+
 class IsAdminOrManager(permissions.BasePermission):
     """Allows access only to admin or manager users."""
 

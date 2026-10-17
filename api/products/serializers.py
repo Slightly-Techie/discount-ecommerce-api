@@ -2,6 +2,8 @@ from rest_framework import serializers
 
 from api.category.models import Category, Tag
 from api.category.serializers import CategorySerializer, TagSerializer
+from api.common.permissions import is_platform_staff
+from api.vendors.models import Vendor
 
 from .models import Product, ProductImage, ProductReview, ProductVariant
 
@@ -51,7 +53,15 @@ class ProductReviewSerializer(serializers.ModelSerializer):
         ]
 
 
+class ProductVendorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vendor
+        fields = ["id", "name", "slug"]
+        read_only_fields = fields
+
+
 class ProductReadSerializer(serializers.ModelSerializer):
+    vendor = ProductVendorSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
     tags = TagSerializer(many=True, read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
@@ -89,6 +99,7 @@ class ProductReadSerializer(serializers.ModelSerializer):
             "is_featured",
             "stock",
             "is_deleted",
+            "vendor",
             "related_products",
             "variants",
             "reviews",
@@ -116,6 +127,19 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         required=False,
         help_text="List of related product IDs.",
     )
+    vendor = serializers.PrimaryKeyRelatedField(
+        queryset=Vendor.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="Owning vendor. Platform staff only; ignored for everyone else.",
+    )
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        if not (request and is_platform_staff(request.user)):
+            attrs.pop("vendor", None)
+            attrs.pop("is_featured", None)
+        return attrs
 
     class Meta:
         model = Product
@@ -134,6 +158,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
             "is_available",
             "is_featured",
             "stock",
+            "vendor",
             "related_products",
         ]
 

@@ -1,6 +1,7 @@
 import csv
 from io import StringIO
 
+from django.db.models import Q
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
 from rest_framework.fields import BooleanField
@@ -8,7 +9,11 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.common.permissions import IsAdminManagerOrApprovedVendorAdmin, IsAdminOrManager
+from api.common.permissions import (
+    IsAdminManagerOrApprovedVendorAdmin,
+    IsAdminOrManager,
+    is_platform_staff,
+)
 
 from .models import Product, ProductImage, ProductReview, ProductVariant
 from .serializers import (
@@ -19,8 +24,21 @@ from .serializers import (
     ProductReviewSerializer,
     ProductVariantSerializer,
 )
+from .visibility import shopper_visible_q
 
 # Create your views here.
+
+
+def _scope_products(qs, request):
+    """Staff see all; vendor admins read shop + own but write own only; others see the shop."""
+    user = request.user
+    if is_platform_staff(user):
+        return qs.all()
+    if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
+        if request.method in permissions.SAFE_METHODS:
+            return qs.filter(shopper_visible_q() | Q(vendor=user.vendor))
+        return qs.filter(vendor=user.vendor)
+    return qs.filter(shopper_visible_q())
 
 
 class ProductListCreateView(generics.ListCreateAPIView):
@@ -32,7 +50,7 @@ class ProductListCreateView(generics.ListCreateAPIView):
     """
 
     permission_classes = [permissions.AllowAny]
-    filterset_fields = ["source", "source_platform", "category", "tags"]
+    filterset_fields = ["source", "source_platform", "category", "tags", "vendor"]
     search_fields = ["name", "description", "source_platform"]
     ordering_fields = ["price", "discount_price", "created_at", "updated_at"]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -41,16 +59,7 @@ class ProductListCreateView(generics.ListCreateAPIView):
         qs = Product.objects.select_related("category").prefetch_related(
             "tags", "related_products"
         )
-        user = self.request.user
-        if user.is_authenticated and (
-            user.is_staff
-            or getattr(user, "role", None) in ["admin", "manager"]
-        ):
-            return qs.all().order_by("-created_at")
-        if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
-            # Vendor admins can see only their own vendor's products (including drafts)
-            return qs.filter(vendor=user.vendor).order_by("-created_at")
-        return qs.filter(is_deleted=False).order_by("-created_at")
+        return _scope_products(qs, self.request).order_by("-created_at")
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -74,7 +83,7 @@ class ProductListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         user = self.request.user
         if getattr(user, "role", None) == "vendor_admin":
-            serializer.save(source="internal", vendor=user.vendor)
+            serializer.save(source="internal", vendor=user.vendor, is_featured=False)
         else:
             serializer.save(source="internal")
 
@@ -95,14 +104,7 @@ class ProductRetrieveView(generics.RetrieveUpdateDestroyAPIView):
         qs = Product.objects.select_related("category").prefetch_related(
             "tags", "related_products"
         )
-        user = self.request.user
-        if user.is_authenticated and (
-            user.is_staff or getattr(user, "role", None) in ["admin", "manager"]
-        ):
-            return qs.all()
-        if user.is_authenticated and getattr(user, "role", None) == "vendor_admin":
-            return qs.filter(vendor=user.vendor)
-        return qs.filter(is_deleted=False)
+        return _scope_products(qs, self.request)
 
     def get_serializer_class(self):
         if self.request.method in ["PUT", "PATCH"]:
@@ -250,14 +252,14 @@ class ProductBulkUploadView(APIView):
         # JSON bulk upload
         if isinstance(request.data, list):
             for idx, item in enumerate(request.data):
-                serializer = ProductCreateSerializer(data=item)
+                serializer = ProductCreateSerializer(data=item, context={"request": request})
                 if serializer.is_valid():
                     created.append(serializer.save())
                 else:
                     errors.append({"index": idx, "errors": serializer.errors})
         elif isinstance(request.data, dict) and "products" in request.data:
             for idx, item in enumerate(request.data["products"]):
-                serializer = ProductCreateSerializer(data=item)
+                serializer = ProductCreateSerializer(data=item, context={"request": request})
                 if serializer.is_valid():
                     created.append(serializer.save())
                 else:
@@ -268,7 +270,7 @@ class ProductBulkUploadView(APIView):
             decoded_file = file.read().decode("utf-8")
             reader = csv.DictReader(StringIO(decoded_file))
             for idx, row in enumerate(reader):
-                serializer = ProductCreateSerializer(data=row)
+                serializer = ProductCreateSerializer(data=row, context={"request": request})
                 if serializer.is_valid():
                     created.append(serializer.save())
                 else:
