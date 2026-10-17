@@ -7,6 +7,14 @@ DATABASE_URL=sqlite:///db.sqlite3
 # Email settings
 DEFAULT_FROM_EMAIL=webmaster@localhost
 EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+# Production (Resend SMTP):
+# EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+# EMAIL_HOST=smtp.resend.com
+# EMAIL_PORT=587
+# EMAIL_HOST_USER=resend
+# EMAIL_HOST_PASSWORD=<resend api key>
+# EMAIL_USE_TLS=True
+# DEFAULT_FROM_EMAIL=GrottoMore <noreply@grottomore.com>
 
 # OTP/2FA settings
 BASE_OTP_SECRET=your-very-secure-base32-secret
