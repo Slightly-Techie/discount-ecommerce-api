@@ -43,6 +43,31 @@ def notify_admins_vendor_signup(vendor, applicant):
     return notifications
 
 
+def notify_admins_vendor_request(vendor_request):
+    """Tell every platform admin (in-app + email) that someone wants to sell."""
+    admins = list(get_platform_admins())
+    if not admins:
+        return
+    title = f"New seller request: {vendor_request.business_name}"
+    message = (
+        f"{vendor_request.contact_name} ({vendor_request.email}, "
+        f"{vendor_request.phone}) wants to sell on GrottoMore as "
+        f"\"{vendor_request.business_name}\". They sell: {vendor_request.sells}"
+    )
+    Notification.objects.bulk_create(
+        [
+            Notification(
+                recipient=admin,
+                type=Notification.Type.VENDOR_REQUEST,
+                title=title,
+                message=message,
+            )
+            for admin in admins
+        ]
+    )
+    send_email(title, message, [a.email for a in admins])
+
+
 STATUS_MESSAGES = {
     "approved": (
         Notification.Type.VENDOR_APPROVED,

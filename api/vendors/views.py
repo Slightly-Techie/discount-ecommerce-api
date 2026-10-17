@@ -2,19 +2,23 @@ from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from api.common.permissions import IsAdminOrManager
 from api.notifications.services import (
+    notify_admins_vendor_request,
     notify_admins_vendor_signup,
     notify_vendor_status_change,
 )
-from api.vendors.models import Vendor
+from api.vendors.models import Vendor, VendorRequest
 
 from .serializers import (
     VendorAdminSignupResponseSerializer,
     VendorAdminSerializer,
     VendorAdminSignupSerializer,
+    VendorRequestCreateSerializer,
+    VendorRequestSerializer,
     VendorSerializer,
     VendorUpdateSerializer,
 )
@@ -174,3 +178,51 @@ class VendorSuspendView(APIView):
         notify_vendor_status_change(vendor)
         return Response({"detail": "Vendor suspended."})
 
+
+
+class VendorRequestListCreateView(generics.ListCreateAPIView):
+    """
+    POST: public "Sell on GrottoMore" form (throttled per IP).
+    GET: platform staff review the requests, optionally filtered by ?status=.
+    """
+
+    queryset = VendorRequest.objects.all()
+    filterset_fields = ["status"]
+    throttle_scope = "vendor_request"
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsAdminOrManager()]
+
+    def get_throttles(self):
+        if self.request.method == "POST":
+            return [ScopedRateThrottle()]
+        return []
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return VendorRequestCreateSerializer
+        return VendorRequestSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        vendor_request = serializer.save()
+        notify_admins_vendor_request(vendor_request)
+        return Response(
+            {"detail": "Thanks, we'll be in touch."}, status=status.HTTP_201_CREATED
+        )
+
+
+class VendorRequestDismissView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def patch(self, request, pk):
+        try:
+            vendor_request = VendorRequest.objects.get(pk=pk)
+        except VendorRequest.DoesNotExist:
+            return Response({"detail": "Request not found."}, status=404)
+        vendor_request.status = VendorRequest.Status.DISMISSED
+        vendor_request.save(update_fields=["status", "updated_at"])
+        return Response(VendorRequestSerializer(vendor_request).data)

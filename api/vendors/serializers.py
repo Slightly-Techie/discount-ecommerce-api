@@ -3,6 +3,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Vendor as VendorModel
+from .models import VendorRequest
 
 
 class VendorSerializer(serializers.ModelSerializer):
@@ -114,3 +115,30 @@ class VendorAdminSignupResponseSerializer(serializers.Serializer):
     vendor = VendorSerializer()
     refresh = serializers.CharField()
     access = serializers.CharField()
+
+
+class VendorRequestCreateSerializer(serializers.ModelSerializer):
+    sells = serializers.CharField(max_length=1000)
+    message = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+
+    class Meta:
+        model = VendorRequest
+        fields = ["business_name", "contact_name", "email", "phone", "sells", "message"]
+
+
+class VendorRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VendorRequest
+        fields = [
+            "id",
+            "business_name",
+            "contact_name",
+            "email",
+            "phone",
+            "sells",
+            "message",
+            "status",
+            "vendor",
+            "created_at",
+        ]
+        read_only_fields = fields

@@ -183,6 +183,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
+    "DEFAULT_THROTTLE_RATES": {"vendor_request": "5/hour"},
 }
 
 # Email: read from the environment. The default prints to the console so local
