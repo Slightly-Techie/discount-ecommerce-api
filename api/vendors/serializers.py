@@ -1,6 +1,9 @@
-from django.contrib.auth.password_validation import validate_password
+import pyotp
+from django.db import transaction
 from rest_framework import serializers
-from rest_framework_simplejwt.tokens import RefreshToken
+
+from api.common.utils import validate_phonenumber
+from api.users.models import User
 
 from .models import Vendor as VendorModel
 from .models import VendorRequest
@@ -60,61 +63,81 @@ class VendorUpdateSerializer(serializers.ModelSerializer):
             "about",
         ]
 
-class VendorAdminSignupSerializer(serializers.Serializer):
-    # User fields
-    email = serializers.EmailField()
-    phonenumber = serializers.CharField()
-    password = serializers.CharField(write_only=True, validators=[validate_password])
-    first_name = serializers.CharField(required=False, allow_blank=True)
-    last_name = serializers.CharField(required=False, allow_blank=True)
+class VendorCreateSerializer(serializers.ModelSerializer):
+    """Staff create a vendor together with the login that owns it."""
 
-    # Vendor fields
-    vendor_name = serializers.CharField(max_length=255)
+    owner_email = serializers.EmailField()
+    owner_first_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    owner_last_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    owner_phonenumber = serializers.CharField(validators=[validate_phonenumber])
+    request = serializers.UUIDField(required=False)
 
-    def validate_email(self, value: str):
-        from api.users.models import User
-        if User.objects.filter(email__iexact=value.strip()).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
-        return value.strip()
+    class Meta:
+        model = VendorModel
+        fields = [
+            "name",
+            "business_email",
+            "phone",
+            "address",
+            "website",
+            "about",
+            "logo",
+            "owner_email",
+            "owner_first_name",
+            "owner_last_name",
+            "owner_phonenumber",
+            "request",
+        ]
 
-    def validate_vendor_name(self, value: str):
-        if VendorModel.objects.filter(name__iexact=value.strip()).exists():
+    def validate_name(self, value):
+        value = value.strip()
+        if VendorModel.objects.filter(name__iexact=value).exists():
             raise serializers.ValidationError("Vendor name already exists.")
-        return value.strip()
+        return value
+
+    def validate_owner_email(self, value):
+        value = value.strip()
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError(
+                "This email already has an account; use another email for the vendor login."
+            )
+        return value
+
+    def validate_owner_phonenumber(self, value):
+        value = value.strip()
+        if User.objects.filter(phonenumber=value).exists():
+            raise serializers.ValidationError("This phone number already has an account.")
+        return value
+
+    def validate_request(self, value):
+        try:
+            return VendorRequest.objects.get(pk=value, status=VendorRequest.Status.NEW)
+        except VendorRequest.DoesNotExist:
+            raise serializers.ValidationError("This request does not exist or was already handled.")
 
     def create(self, validated_data):
-        from api.users.models import User
-        import pyotp
-
-        vendor_name = validated_data.pop("vendor_name")
-        password = validated_data.pop("password")
-
-        otp_secret = pyotp.random_base32()
-        user = User.objects.create_user(
-            role=User.Role.VENDOR_ADMIN,
-            otp_secret=otp_secret,
-            password=password,
-            **validated_data,
-        )
-        vendor = VendorModel.objects.create(name=vendor_name, status=VendorModel.Status.PENDING)
-        user.vendor = vendor
-        user.is_active = True
-        user.save(update_fields=["vendor", "is_active", "updated_at"])
-
-        refresh = RefreshToken.for_user(user)
-        return {
-            "user": user,
-            "vendor": vendor,
-            "refresh": str(refresh),
-            "access": str(refresh.access_token),
+        vendor_request = validated_data.pop("request", None)
+        owner = {
+            key: validated_data.pop(f"owner_{key}")
+            for key in ("email", "first_name", "last_name", "phonenumber")
+            if f"owner_{key}" in validated_data
         }
-
-
-class VendorAdminSignupResponseSerializer(serializers.Serializer):
-    user = serializers.DictField()
-    vendor = VendorSerializer()
-    refresh = serializers.CharField()
-    access = serializers.CharField()
+        with transaction.atomic():
+            vendor = VendorModel.objects.create(
+                status=VendorModel.Status.APPROVED, **validated_data
+            )
+            self.owner = User.objects.create_user(
+                password=None,
+                role=User.Role.VENDOR_ADMIN,
+                vendor=vendor,
+                otp_secret=pyotp.random_base32(),
+                **owner,
+            )
+            if vendor_request is not None:
+                vendor_request.status = VendorRequest.Status.CONVERTED
+                vendor_request.vendor = vendor
+                vendor_request.save(update_fields=["status", "vendor", "updated_at"])
+        return vendor
 
 
 class VendorRequestCreateSerializer(serializers.ModelSerializer):

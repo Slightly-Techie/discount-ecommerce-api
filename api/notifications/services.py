@@ -16,33 +16,6 @@ def get_platform_admins():
     ).distinct()
 
 
-def notify_admins_vendor_signup(vendor, applicant):
-    """Notify every platform admin (in-app + email) that a vendor is awaiting approval."""
-    admins = list(get_platform_admins())
-    if not admins:
-        return []
-    name = f"{applicant.first_name} {applicant.last_name}".strip() or applicant.email
-    title = f"New vendor awaiting approval: {vendor.name}"
-    message = (
-        f"{name} ({applicant.email}) registered the vendor \"{vendor.name}\" "
-        "and is awaiting approval."
-    )
-    notifications = Notification.objects.bulk_create(
-        [
-            Notification(
-                recipient=admin,
-                type=Notification.Type.VENDOR_SIGNUP,
-                title=title,
-                message=message,
-                vendor=vendor,
-            )
-            for admin in admins
-        ]
-    )
-    send_email(title, message, [a.email for a in admins])
-    return notifications
-
-
 def notify_admins_vendor_request(vendor_request):
     """Tell every platform admin (in-app + email) that someone wants to sell."""
     admins = list(get_platform_admins())

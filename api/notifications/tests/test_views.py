@@ -8,43 +8,6 @@ from api.vendors.models import Vendor
 pytestmark = pytest.mark.django_db
 
 
-SIGNUP_DATA = {
-    "email": "newvendor@example.com",
-    "phonenumber": "+233209999999",
-    "password": "SecurePass123!",
-    "first_name": "Ama",
-    "last_name": "Mensah",
-    "vendor_name": "Ama Stores",
-}
-
-
-class TestVendorSignupNotifiesAdmins:
-    def test_signup_creates_notification_for_each_admin(self, api_client, user_factory):
-        role_admin = user_factory(role="admin")
-        staff = user_factory(is_staff=True)
-        customer = user_factory()
-        user_factory(role="admin", is_active=False)  # inactive admins are skipped
-
-        response = api_client.post(reverse("vendors:vendor-admin-signup"), SIGNUP_DATA)
-
-        assert response.status_code == 201
-        vendor = Vendor.objects.get(name="Ama Stores")
-        recipients = set(
-            Notification.objects.filter(
-                type=Notification.Type.VENDOR_SIGNUP, vendor=vendor
-            ).values_list("recipient_id", flat=True)
-        )
-        assert recipients == {role_admin.id, staff.id}
-        assert customer.id not in recipients
-        assert len(mail.outbox) == 1
-        assert set(mail.outbox[0].to) == {role_admin.email, staff.email}
-
-    def test_signup_without_admins_still_succeeds(self, api_client):
-        response = api_client.post(reverse("vendors:vendor-admin-signup"), SIGNUP_DATA)
-        assert response.status_code == 201
-        assert Notification.objects.count() == 0
-
-
 class TestVendorDecisionNotifications:
     def _pending_vendor(self, user_factory, vendor_factory):
         vendor = vendor_factory(status=Vendor.Status.PENDING)
