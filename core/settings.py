@@ -141,26 +141,53 @@ USE_S3 = env.bool("USE_S3", default=False)
 # Always define STATIC_ROOT for Django's staticfiles app
 STATIC_ROOT = os.path.join(BASE_DIR, "static")
 
-if USE_S3:
-    print("Using AWS S3")
-    # AWS S3 settings for both static and media
-    AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
-    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY")
-    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default=None)
-    AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
-    AWS_LOCATION = ""
-    AWS_QUERYSTRING_AUTH = False  # Optional: makes files public
+# Static files stay on the server (nginx serves them). Uploads go to the
+# "default" storage, which is public, except payment proofs, which use the
+# "private" storage and are only streamed through an authorised view.
+STATIC_URL = "/static/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
-    STATICFILES_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
-    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
+if USE_S3:
+    # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY when set,
+    # otherwise boto3 falls back to the EC2 instance role.
+    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default=None)
+    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default=None)
+    AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
+    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME")
+    AWS_S3_FILE_OVERWRITE = False
+    # The bucket has ACLs disabled; public access to public/ comes from the bucket policy.
+    AWS_DEFAULT_ACL = None
+    AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=31536000"}
+    _s3_domain = f"{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com"
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "location": "public",
+                "custom_domain": _s3_domain,
+                "querystring_auth": False,
+            },
+        },
+        "private": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {"location": "private", "querystring_auth": True},
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+    MEDIA_URL = f"https://{_s3_domain}/public/"
 else:
-    print("Using local storage")
-    STATIC_URL = "/static/"
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        # Same folder as default; nginx refuses /media/payment_proofs/.
+        "private": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
     MEDIA_URL = "/media/"
-    MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

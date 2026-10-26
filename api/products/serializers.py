@@ -1,3 +1,5 @@
+import os
+
 from django.db.models import Q
 from rest_framework import serializers
 
@@ -8,6 +10,9 @@ from api.vendors.models import Vendor
 
 from .models import Product, ProductImage, ProductReview, ProductVariant
 from .visibility import shopper_visible_q
+
+MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
+PRODUCT_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 def _require_own_product(serializer, product):
@@ -172,6 +177,15 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         help_text="Owning vendor. Platform staff only; ignored for everyone else.",
     )
 
+    def validate_image(self, value):
+        if value is None:
+            return value
+        if os.path.splitext(value.name)[1].lower() not in PRODUCT_IMAGE_EXTENSIONS:
+            raise serializers.ValidationError("Upload a JPEG, PNG or WebP image.")
+        if value.size > MAX_PRODUCT_IMAGE_BYTES:
+            raise serializers.ValidationError("Image must be 5 MB or smaller.")
+        return value
+
     def validate(self, attrs):
         request = self.context.get("request")
         if not (request and is_platform_staff(request.user)):
@@ -189,6 +203,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
+            "id",
             "name",
             "description",
             "price",

@@ -26,8 +26,11 @@ EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
 BASE_OTP_SECRET=your-very-secure-base32-secret
 
 # Any other settings you need can be added here 
+# Uploads: public/ (product, vendor, profile images) and private/ (payment proofs)
+# in one bucket. Static files are always served by nginx.
 USE_S3=False
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_STORAGE_BUCKET_NAME=your-bucket-name
-AWS_S3_REGION_NAME=your-region 
+AWS_S3_REGION_NAME=your-region
+# Leave the keys unset to use the EC2 instance role instead.
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key 
