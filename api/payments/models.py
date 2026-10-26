@@ -2,6 +2,7 @@ from django.conf import settings
 from django.db import models
 
 from api.common.models import BaseModel
+from api.common.storage import private_storage
 
 from .validators import screenshot_upload_to, validate_screenshot
 
@@ -52,6 +53,7 @@ class PaymentSubmission(BaseModel):
     sender_number = models.CharField(max_length=50, blank=True)
     screenshot = models.ImageField(
         upload_to=screenshot_upload_to,
+        storage=private_storage,
         blank=True,
         null=True,
         validators=[validate_screenshot],
