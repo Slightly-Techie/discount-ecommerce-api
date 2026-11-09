@@ -6,6 +6,7 @@ from django.core import mail
 from django.urls import reverse
 
 from api.products.models import Product
+from api.users.invites import set_password_url
 from api.users.models import User
 from api.vendors.models import Vendor, VendorRequest
 
@@ -159,6 +160,137 @@ class TestResendInvite:
         api_client.force_authenticate(user=user_factory(role="admin"))
         url = reverse("vendors:vendor-resend-invite", args=[uuid.uuid4()])
         assert api_client.post(url).status_code == 404
+
+
+class TestChangeOwnerEmail:
+    URL_NAME = "vendors:vendor-owner-email"
+
+    def _uninvited_owner(self, user_factory, vendor, email="info@swghana.com"):
+        owner = user_factory(role="vendor_admin", vendor=vendor, email=email)
+        owner.set_unusable_password()
+        owner.save()
+        return owner
+
+    def test_change_email_moves_invite_to_new_address(
+        self, staff_client, user_factory, vendor_factory
+    ):
+        vendor = vendor_factory()
+        owner = self._uninvited_owner(user_factory, vendor)
+        old_link = set_password_url(owner)
+
+        response = staff_client.patch(
+            reverse(self.URL_NAME, args=[vendor.id]),
+            {"email": " danubehomeghana@gmail.com "},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert response.data == {"email": "danubehomeghana@gmail.com", "invite_sent": True}
+        owner.refresh_from_db()
+        assert owner.email == "danubehomeghana@gmail.com"
+        assert owner.is_email_verified is False
+        assert len(mail.outbox) == 1
+        assert mail.outbox[0].to == ["danubehomeghana@gmail.com"]
+        uid, token = re.search(r"uid=([^&\s]+)&token=([^\s]+)", old_link).groups()
+        stale = staff_client.post(
+            reverse("password-reset-confirm"),
+            {"uid": uid, "token": token, "new_password": "SecurePass123!"},
+            format="json",
+        )
+        assert stale.status_code == 400
+
+    def test_owner_with_password_is_not_sent_an_invite(
+        self, staff_client, user_factory, vendor_factory
+    ):
+        vendor = vendor_factory()
+        owner = user_factory(role="vendor_admin", vendor=vendor)
+
+        response = staff_client.patch(
+            reverse(self.URL_NAME, args=[vendor.id]), {"email": "new@example.com"}, format="json"
+        )
+
+        assert response.status_code == 200
+        assert response.data == {"email": "new@example.com", "invite_sent": None}
+        owner.refresh_from_db()
+        assert owner.email == "new@example.com"
+        assert owner.has_usable_password()
+        assert len(mail.outbox) == 0
+
+    def test_email_still_changes_when_invite_fails(
+        self, staff_client, user_factory, vendor_factory, monkeypatch
+    ):
+        def boom(*args, **kwargs):
+            raise OSError("smtp down")
+
+        monkeypatch.setattr("api.users.invites.send_mail", boom)
+        vendor = vendor_factory()
+        owner = self._uninvited_owner(user_factory, vendor)
+
+        response = staff_client.patch(
+            reverse(self.URL_NAME, args=[vendor.id]), {"email": "new@example.com"}, format="json"
+        )
+
+        assert response.status_code == 200
+        assert response.data == {"email": "new@example.com", "invite_sent": False}
+        owner.refresh_from_db()
+        assert owner.email == "new@example.com"
+
+    def test_rejects_email_used_by_another_account(
+        self, staff_client, user_factory, vendor_factory
+    ):
+        vendor = vendor_factory()
+        owner = self._uninvited_owner(user_factory, vendor)
+        user_factory(email="taken@example.com")
+
+        for email in ("TAKEN@example.com", "not-an-email", ""):
+            response = staff_client.patch(
+                reverse(self.URL_NAME, args=[vendor.id]), {"email": email}, format="json"
+            )
+            assert response.status_code == 400
+            assert "email" in response.data
+
+        owner.refresh_from_db()
+        assert owner.email == "info@swghana.com"
+        assert len(mail.outbox) == 0
+
+    def test_allows_changing_only_the_case_of_own_email(
+        self, staff_client, user_factory, vendor_factory
+    ):
+        vendor = vendor_factory()
+        self._uninvited_owner(user_factory, vendor)
+
+        response = staff_client.patch(
+            reverse(self.URL_NAME, args=[vendor.id]), {"email": "Info@SWGhana.com"}, format="json"
+        )
+
+        assert response.status_code == 200
+
+    def test_ownerless_and_unknown_vendor(self, staff_client, vendor_factory):
+        ownerless = vendor_factory()
+        response = staff_client.patch(
+            reverse(self.URL_NAME, args=[ownerless.id]), {"email": "a@example.com"}, format="json"
+        )
+        assert response.status_code == 400
+        assert response.data["detail"] == "This vendor has no login to update."
+
+        response = staff_client.patch(
+            reverse(self.URL_NAME, args=[uuid.uuid4()]), {"email": "a@example.com"}, format="json"
+        )
+        assert response.status_code == 404
+
+    def test_only_staff_can_change_owner_email(self, api_client, user_factory, vendor_factory):
+        vendor = vendor_factory()
+        owner = self._uninvited_owner(user_factory, vendor)
+        url = reverse(self.URL_NAME, args=[vendor.id])
+        payload = {"email": "attacker@example.com"}
+
+        assert api_client.patch(url, payload, format="json").status_code == 401
+        for user in (user_factory(role="customer"), owner):
+            api_client.force_authenticate(user=user)
+            assert api_client.patch(url, payload, format="json").status_code == 403
+
+        owner.refresh_from_db()
+        assert owner.email == "info@swghana.com"
 
 
 def test_vendor_self_signup_is_gone(api_client):

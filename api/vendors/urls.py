@@ -4,6 +4,7 @@ from .views import (
     VendorApproveView,
     VendorListView,
     VendorMeView,
+    VendorOwnerEmailView,
     VendorRejectView,
     VendorRequestDismissView,
     VendorRequestListCreateView,
@@ -29,7 +30,12 @@ urlpatterns = [
         VendorResendInviteView.as_view(),
         name="vendor-resend-invite",
     ),
-    path("<uuid:pk>/approve/", VendorApproveView.as_view(), name="vendor-approve"),
+    path(
+        "<uuid:pk>/owner-email/",
+        VendorOwnerEmailView.as_view(),
+        name="vendor-owner-email",
+    ),
+    path("<uuid:pk>/approve/",VendorApproveView.as_view(), name="vendor-approve"),
     path("<uuid:pk>/reject/", VendorRejectView.as_view(), name="vendor-reject"),
     path("<uuid:pk>/suspend/", VendorSuspendView.as_view(), name="vendor-suspend"),
 ]
