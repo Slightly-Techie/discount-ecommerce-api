@@ -3,7 +3,7 @@
 ## Project Overview
 Django REST Framework-based e-commerce backend supporting multi-vendor marketplace operations, product management, shopping cart, orders with shipping/tax calculations, and JWT authentication with role-based access control.
 
-**Live Domains**: grottomore.com | discount-ecommerce-frontend.vercel.app
+**Live Domains**: API at api.grottomore.com; frontend at www.grottomore.com (grottomore.com redirects there), deployed from the frontend repo's master by the Vercel project in the slightly-techies-projects team. discount-ecommerce-frontend.vercel.app is an old, abandoned Vercel project frozen at an Oct 2026 build; it is not production.
 
 ## Tech Stack
 - **Framework**: Django 5.2.4 + Django REST Framework 3.14+
