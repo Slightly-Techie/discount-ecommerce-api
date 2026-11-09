@@ -15,6 +15,7 @@ from api.vendors.models import Vendor, VendorRequest
 from .serializers import (
     VendorAdminSerializer,
     VendorCreateSerializer,
+    VendorOwnerEmailSerializer,
     VendorRequestCreateSerializer,
     VendorRequestSerializer,
     VendorSerializer,
@@ -122,6 +123,33 @@ class VendorResendInviteView(APIView):
         if owner is None:
             return Response({"detail": "This vendor has no login to invite."}, status=400)
         return Response({"invite_sent": send_vendor_invite(owner, vendor)})
+
+
+class VendorOwnerEmailView(APIView):
+    """Staff change the owner's login email. Owners who haven't set a password get a new invite.
+
+    invite_sent is None when no invite was needed, False when sending it failed.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def patch(self, request, pk):
+        try:
+            vendor = Vendor.objects.get(pk=pk)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor not found."}, status=404)
+        owner = vendor.admins.first()
+        if owner is None:
+            return Response({"detail": "This vendor has no login to update."}, status=400)
+        serializer = VendorOwnerEmailSerializer(data=request.data, context={"owner": owner})
+        serializer.is_valid(raise_exception=True)
+        owner.email = serializer.validated_data["email"]
+        owner.is_email_verified = False
+        owner.save()
+        invite_sent = None
+        if not owner.has_usable_password():
+            invite_sent = send_vendor_invite(owner, vendor)
+        return Response({"email": owner.email, "invite_sent": invite_sent})
 
 
 class VendorApproveView(APIView):

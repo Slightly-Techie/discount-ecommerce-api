@@ -63,6 +63,19 @@ class VendorUpdateSerializer(serializers.ModelSerializer):
             "about",
         ]
 
+class VendorOwnerEmailSerializer(serializers.Serializer):
+    """Staff correct the login email of a vendor's owner. Pass the owner as context["owner"]."""
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        value = User.objects.normalize_email(value.strip())
+        owner = self.context["owner"]
+        if User.objects.filter(email__iexact=value).exclude(pk=owner.pk).exists():
+            raise serializers.ValidationError("This email already has an account.")
+        return value
+
+
 class VendorCreateSerializer(serializers.ModelSerializer):
     """Staff create a vendor together with the login that owns it."""
 
